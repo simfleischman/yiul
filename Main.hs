@@ -3,6 +3,7 @@
 
 module Main where
 
+import qualified Avail
 import Control.Monad (when)
 import qualified Data.Array as Array
 import Data.ByteString (ByteString)
@@ -26,6 +27,7 @@ import qualified System.Directory.Recursive as Directory.Recursive
 import qualified System.Environment as Environment
 import qualified System.FilePath as FilePath
 import qualified UniqSupply
+import qualified UniqSet
 
 loadHieFiles :: NameCache -> [FilePath] -> IO (NameCache, [(FilePath, HieFileResult)])
 loadHieFiles initialNameCache = foldrM go (initialNameCache, [])
@@ -87,7 +89,8 @@ makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
           "Haskell Source File",
           "Module UnitId",
           "Module Name",
-          "Types used in module"
+          "Types used",
+          "Exports"
         ]
     makeLine (filePath, hieFileResult) =
       let hieFile =  HieBin.hie_file_result hieFileResult
@@ -98,7 +101,8 @@ makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
           (Text.pack . HieTypes.hie_hs_file) hieFile,
           (makeUnitIdText . Module.moduleUnitId) hieModule,
           (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
-          (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile
+          (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile,
+          (Text.pack . show . UniqSet.sizeUniqSet . Avail.availsToNameSet . HieTypes.hie_exports) hieFile
         ]
 
 makeUnitIdText :: Module.UnitId -> Text
