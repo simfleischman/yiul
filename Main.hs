@@ -88,6 +88,19 @@ makeVersionMap = Map.unionsWith (<>) . fmap go
         (HieBin.hie_file_result_version hieFileResult, HieBin.hie_file_result_ghc_version hieFileResult)
         [pair]
 
+checkHieVersions :: [(FilePath, HieFileResult)] -> IO ()
+checkHieVersions hieFileResults = do
+  let versionMap = makeVersionMap hieFileResults
+      versionMapKeys = Map.keys versionMap
+  case versionMapKeys of
+    [] -> fail "No .hie files found"
+    [(hieVersion, _ghcVersion)] -> do
+      when (HieTypes.hieVersion /= hieVersion) do
+        fail $ "Our HIE version: " <> show HieTypes.hieVersion <> " does not match .hie file version: " <> show hieVersion
+    _ : _ : _ -> do
+      putStrLn "Multiple versions of HIE/GHC found. See version report for details."
+      mapM_ (\(hieVersion, ghcVersion) -> putStrLn $ show hieVersion <> " / " <> (Text.unpack . Text.Encoding.decodeUtf8) ghcVersion) versionMapKeys
+
 main :: IO ()
 main = do
   args <- Environment.getArgs
@@ -109,14 +122,4 @@ main = do
   let reportsDir = "reports/"
   Directory.createDirectoryIfMissing True reportsDir
   writeVersionReport reportsDir hieFileResults
-
-  let versionMap = makeVersionMap hieFileResults
-      versionMapKeys = Map.keys versionMap
-  case versionMapKeys of
-    [] -> fail "No .hie files found"
-    [(hieVersion, _ghcVersion)] -> do
-      when (HieTypes.hieVersion /= hieVersion) do
-        fail $ "Our HIE version: " <> show HieTypes.hieVersion <> " does not match .hie file version: " <> show hieVersion
-    _ : _ : _ -> do
-      putStrLn "Multiple versions of HIE/GHC found. See version report for details."
-      mapM_ (\(hieVersion, ghcVersion) -> putStrLn $ show hieVersion <> " / " <> (Text.unpack . Text.Encoding.decodeUtf8) ghcVersion) versionMapKeys
+  checkHieVersions hieFileResults
