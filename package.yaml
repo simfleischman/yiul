@@ -1,0 +1,11 @@
+name: yiul
+version: 1.0
+
+ghc-options:
+- -Wall
+
+dependencies:
+- base
+
+executable:
+  main: Main.hs
