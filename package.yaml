@@ -5,7 +5,19 @@ ghc-options:
 - -Wall
 
 dependencies:
+- array
 - base
+- bytestring
+- containers
+- directory
+- dir-traverse
+- filepath
+- generic-lens
+- ghc
+- ghc-paths
+- lens
+- mtl
+- pretty-simple
 
 executable:
   main: Main.hs
