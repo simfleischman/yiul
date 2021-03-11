@@ -1,46 +1,36 @@
+{-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
-import Control.Lens ((^.))
-import Data.Generics.Labels ()
-import qualified Avail
-import qualified Control.Lens as Lens
-import qualified Control.Monad.State.Strict as MonadState
-import qualified Data.Array as Array
+import Control.Monad (when)
+import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
-import qualified Data.List as List
-import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
-import qualified FastString
-import qualified FieldLabel
-import qualified GHC
-import qualified GHC.Paths
+import Data.Foldable (foldrM)
+import Data.Generics.Labels ()
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text.Encoding
+import HieBin (HieFileResult)
 import qualified HieBin
 import qualified HieTypes
-import qualified HieUtils
-import qualified Module
-import qualified Name
-import qualified NameCache
-import qualified Outputable
-import qualified UniqSupply
 import NameCache (NameCache)
-import HieBin (HieFileResult)
-import Data.Foldable (foldrM)
+import qualified NameCache
 import qualified System.Directory as Directory
 import qualified System.Directory.Recursive as Directory.Recursive
-import qualified System.FilePath as FilePath
 import qualified System.Environment as Environment
-import qualified System.IO
-import qualified Data.ByteString
-import qualified Data.Text
-import qualified Data.Text.Encoding
+import qualified System.FilePath as FilePath
+import qualified UniqSupply
 
-loadHieFiles :: NameCache -> [FilePath] -> IO (NameCache, [HieFileResult])
+loadHieFiles :: NameCache -> [FilePath] -> IO (NameCache, [(FilePath, HieFileResult)])
 loadHieFiles initialNameCache = foldrM go (initialNameCache, [])
   where
-  go filePath (inputNameCache, hieFileResults) =
-    do
-      (hieFileResult, outputNameCache) <- HieBin.readHieFile inputNameCache filePath
-      return (outputNameCache, hieFileResult : hieFileResults)
+    go filePath (inputNameCache, hieFileResults) =
+      do
+        (hieFileResult, outputNameCache) <- HieBin.readHieFile inputNameCache filePath
+        return (outputNameCache, (filePath, hieFileResult) : hieFileResults)
 
 findHieFiles :: FilePath -> IO [FilePath]
 findHieFiles dir = do
@@ -56,12 +46,47 @@ handleInputPath path = do
       findHieFiles path
     else do
       putStrLn $ "Loading as list of .hie files: " <> path
-      bytes <- Data.ByteString.readFile path
-      let text = Data.Text.Encoding.decodeUtf8 bytes
-      pure
-        $ fmap Data.Text.unpack
-        $ filter (not . Data.Text.null)
-        $ Data.Text.lines text
+      bytes <- ByteString.readFile path
+      let text = Text.Encoding.decodeUtf8 bytes
+      pure $
+        fmap Text.unpack $
+          filter (not . Text.null) $
+            Text.lines text
+
+makeVersionReport :: [(FilePath, HieFileResult)] -> Text
+makeVersionReport = Text.unlines . (headerLine :) . fmap makeLine
+  where
+    headerLine =
+      Text.intercalate
+        "\t"
+        [ "HIE File",
+          "Haskell Source File",
+          "HIE File Version",
+          "GHC Version"
+        ]
+    makeLine (filePath, hieFileResult) =
+      Text.intercalate
+        "\t"
+        [ Text.pack filePath,
+          (Text.pack . HieTypes.hie_hs_file . HieBin.hie_file_result) hieFileResult,
+          (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
+          (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
+        ]
+
+writeVersionReport :: FilePath -> [(FilePath, HieFileResult)] -> IO ()
+writeVersionReport reportsDir hieFileResults = do
+  let versionReportPath = reportsDir <> "version-report.tsv"
+  putStrLn $ "Writing " <> versionReportPath
+  ByteString.writeFile versionReportPath $ Text.Encoding.encodeUtf8 $ makeVersionReport hieFileResults
+
+-- | Index by HIE version (Integer) and GHC version (ByteString)
+makeVersionMap :: [(FilePath, HieFileResult)] -> Map (Integer, ByteString) [(FilePath, HieFileResult)]
+makeVersionMap = Map.unionsWith (<>) . fmap go
+  where
+    go pair@(_, hieFileResult) =
+      Map.singleton
+        (HieBin.hie_file_result_version hieFileResult, HieBin.hie_file_result_ghc_version hieFileResult)
+        [pair]
 
 main :: IO ()
 main = do
@@ -75,10 +100,23 @@ main = do
   hieFilePaths <- handleInputPath inputPath
   putStrLn $ ".hie files found: " <> (show . length) hieFilePaths
 
+  putStrLn "Loading .hie files"
   uniqSupply <- UniqSupply.mkSplitUniqSupply 'Q'
   let initialNameCache = NameCache.initNameCache uniqSupply []
   (_finalNameCache, hieFileResults) <- loadHieFiles initialNameCache hieFilePaths
   putStrLn $ ".hie files loaded: " <> (show . length) hieFileResults
-  System.IO.hFlush System.IO.stdout
 
-  pure ()
+  let reportsDir = "reports/"
+  Directory.createDirectoryIfMissing True reportsDir
+  writeVersionReport reportsDir hieFileResults
+
+  let versionMap = makeVersionMap hieFileResults
+      versionMapKeys = Map.keys versionMap
+  case versionMapKeys of
+    [] -> fail "No .hie files found"
+    [(hieVersion, _ghcVersion)] -> do
+      when (HieTypes.hieVersion /= hieVersion) do
+        fail $ "Our HIE version: " <> show HieTypes.hieVersion <> " does not match .hie file version: " <> show hieVersion
+    _ : _ : _ -> do
+      putStrLn "Multiple versions of HIE/GHC found. See version report for details."
+      mapM_ (\(hieVersion, ghcVersion) -> putStrLn $ show hieVersion <> " / " <> (Text.unpack . Text.Encoding.decodeUtf8) ghcVersion) versionMapKeys
