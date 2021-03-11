@@ -11,3 +11,8 @@ Generate list of .hie files in current directory.
 ```
 find $(pwd) -name '*.hie' > hie-files.txt
 ```
+
+Run the program.
+```
+stack run yiul -- path/to/hie-files.txt
+```
