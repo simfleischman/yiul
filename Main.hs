@@ -4,6 +4,7 @@
 module Main where
 
 import Control.Monad (when)
+import qualified Data.Array as Array
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Foldable (foldrM)
@@ -64,30 +65,50 @@ makeVersionReport = Text.unlines . (headerLine :) . fmap makeLine
         [ "HIE File",
           "Haskell Source File",
           "HIE File Version",
-          "GHC Version",
-          "Module UnitId",
-          "Module Name"
+          "GHC Version"
         ]
     makeLine (filePath, hieFileResult) =
-      Text.intercalate
+      let hieFile =  HieBin.hie_file_result hieFileResult
+      in Text.intercalate
         "\t"
         [ Text.pack filePath,
-          (Text.pack . HieTypes.hie_hs_file . HieBin.hie_file_result) hieFileResult,
+          (Text.pack . HieTypes.hie_hs_file) hieFile,
           (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
-          (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult,
-          (makeUnitIdText . Module.moduleUnitId . HieTypes.hie_module . HieBin.hie_file_result) hieFileResult,
-          (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result) hieFileResult
+          (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
+        ]
+
+makeStatsReport :: [(FilePath, HieFileResult)] -> Text
+makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
+  where
+    headerLine =
+      Text.intercalate
+        "\t"
+        [ "HIE File",
+          "Haskell Source File",
+          "Module UnitId",
+          "Module Name",
+          "Types used in module"
+        ]
+    makeLine (filePath, hieFileResult) =
+      let hieFile =  HieBin.hie_file_result hieFileResult
+          hieModule = HieTypes.hie_module hieFile
+      in Text.intercalate
+        "\t"
+        [ Text.pack filePath,
+          (Text.pack . HieTypes.hie_hs_file) hieFile,
+          (makeUnitIdText . Module.moduleUnitId) hieModule,
+          (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
+          (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile
         ]
 
 makeUnitIdText :: Module.UnitId -> Text
 makeUnitIdText (Module.IndefiniteUnitId _) = "IndefiniteUnitId"
 makeUnitIdText (Module.DefiniteUnitId defUnitId) = (Text.pack . FastString.unpackFS . Module.installedUnitIdFS . Module.unDefUnitId) defUnitId
 
-writeVersionReport :: FilePath -> [(FilePath, HieFileResult)] -> IO ()
-writeVersionReport reportsDir hieFileResults = do
-  let versionReportPath = reportsDir <> "version-report.tsv"
-  putStrLn $ "Writing " <> versionReportPath
-  ByteString.writeFile versionReportPath $ Text.Encoding.encodeUtf8 $ makeVersionReport hieFileResults
+writeReport :: FilePath -> ([(FilePath, HieFileResult)] -> Text) -> [(FilePath, HieFileResult)] -> IO ()
+writeReport reportPath makeReport hieFileResults = do
+  putStrLn $ "Writing " <> reportPath
+  ByteString.writeFile reportPath $ Text.Encoding.encodeUtf8 $ makeReport hieFileResults
 
 -- | Index by HIE version (Integer) and GHC version (ByteString)
 makeVersionMap :: [(FilePath, HieFileResult)] -> Map (Integer, ByteString) [(FilePath, HieFileResult)]
@@ -131,5 +152,7 @@ main = do
 
   let reportsDir = "reports/"
   Directory.createDirectoryIfMissing True reportsDir
-  writeVersionReport reportsDir hieFileResults
+  writeReport (reportsDir <> "version-report.tsv") makeVersionReport hieFileResults
   checkHieVersions hieFileResults
+
+  writeReport (reportsDir <> "stats-report.tsv") makeStatsReport hieFileResults
