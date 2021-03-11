@@ -25,10 +25,14 @@ import qualified UniqSupply
 import NameCache (NameCache)
 import HieBin (HieFileResult)
 import Data.Foldable (foldrM)
-import qualified System.Directory.Recursive as Directory
+import qualified System.Directory as Directory
+import qualified System.Directory.Recursive as Directory.Recursive
 import qualified System.FilePath as FilePath
 import qualified System.Environment as Environment
 import qualified System.IO
+import qualified Data.ByteString
+import qualified Data.Text
+import qualified Data.Text.Encoding
 
 loadHieFiles :: NameCache -> [FilePath] -> IO (NameCache, [HieFileResult])
 loadHieFiles initialNameCache = foldrM go (initialNameCache, [])
@@ -40,24 +44,36 @@ loadHieFiles initialNameCache = foldrM go (initialNameCache, [])
 
 findHieFiles :: FilePath -> IO [FilePath]
 findHieFiles dir = do
-  allFiles <- Directory.getFilesRecursive dir
+  allFiles <- Directory.Recursive.getFilesRecursive dir
   pure $ filter (\path -> FilePath.takeExtension path == ".hie") allFiles
+
+handleInputPath :: FilePath -> IO [FilePath]
+handleInputPath path = do
+  isDir <- Directory.doesDirectoryExist path
+  if isDir
+    then do
+      putStrLn $ "Finding all .hie files in directory: " <> path
+      findHieFiles path
+    else do
+      putStrLn $ "Loading as list of .hie files: " <> path
+      bytes <- Data.ByteString.readFile path
+      let text = Data.Text.Encoding.decodeUtf8 bytes
+      pure
+        $ fmap Data.Text.unpack
+        $ filter (not . Data.Text.null)
+        $ Data.Text.lines text
 
 main :: IO ()
 main = do
   args <- Environment.getArgs
-  rootDir <-
+  inputPath <-
     case args of
       [arg] -> pure arg
-      [] -> fail "Required argument for directory with any .hie files in subdirectories"
-      _ : _ : _ -> fail "Only pass one directory argument"
+      [] -> fail "Required argument: EITHER directory with any .hie files in subdirectories OR a file where each line is an absolute path to an .hie file"
+      _ : _ : _ -> fail "Only pass one path argument"
 
-  putStrLn $ "Finding all .hie files in directory: " <> rootDir
-  System.IO.hFlush System.IO.stdout
-
-  hieFilePaths <- findHieFiles rootDir
+  hieFilePaths <- handleInputPath inputPath
   putStrLn $ ".hie files found: " <> (show . length) hieFilePaths
-  System.IO.hFlush System.IO.stdout
 
   uniqSupply <- UniqSupply.mkSplitUniqSupply 'Q'
   let initialNameCache = NameCache.initNameCache uniqSupply []
