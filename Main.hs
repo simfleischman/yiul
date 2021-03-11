@@ -13,9 +13,11 @@ import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
+import qualified FastString
 import HieBin (HieFileResult)
 import qualified HieBin
 import qualified HieTypes
+import qualified Module
 import NameCache (NameCache)
 import qualified NameCache
 import qualified System.Directory as Directory
@@ -62,7 +64,9 @@ makeVersionReport = Text.unlines . (headerLine :) . fmap makeLine
         [ "HIE File",
           "Haskell Source File",
           "HIE File Version",
-          "GHC Version"
+          "GHC Version",
+          "Module UnitId",
+          "Module Name"
         ]
     makeLine (filePath, hieFileResult) =
       Text.intercalate
@@ -70,8 +74,14 @@ makeVersionReport = Text.unlines . (headerLine :) . fmap makeLine
         [ Text.pack filePath,
           (Text.pack . HieTypes.hie_hs_file . HieBin.hie_file_result) hieFileResult,
           (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
-          (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
+          (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult,
+          (makeUnitIdText . Module.moduleUnitId . HieTypes.hie_module . HieBin.hie_file_result) hieFileResult,
+          (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result) hieFileResult
         ]
+
+makeUnitIdText :: Module.UnitId -> Text
+makeUnitIdText (Module.IndefiniteUnitId _) = "IndefiniteUnitId"
+makeUnitIdText (Module.DefiniteUnitId defUnitId) = (Text.pack . FastString.unpackFS . Module.installedUnitIdFS . Module.unDefUnitId) defUnitId
 
 writeVersionReport :: FilePath -> [(FilePath, HieFileResult)] -> IO ()
 writeVersionReport reportsDir hieFileResults = do
