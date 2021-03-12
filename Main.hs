@@ -93,7 +93,8 @@ makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
           "Module Name",
           "Types used",
           "Exports",
-          "AST filepath count"
+          "AST filepath count",
+          "AST top-level children"
         ]
     makeLine (filePath, hieFileResult) =
       let hieFile = HieBin.hie_file_result hieFileResult
@@ -107,7 +108,8 @@ makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
               (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
               (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile,
               (Text.pack . show . UniqSet.sizeUniqSet . Avail.availsToNameSet . HieTypes.hie_exports) hieFile,
-              (Text.pack . show . Map.size . HieTypes.getAsts . HieTypes.hie_asts) hieFile
+              (Text.pack . show . Map.size . HieTypes.getAsts . HieTypes.hie_asts) hieFile,
+              (Text.pack . show . initialAstChildrenCount) hieFile
             ]
 
 -- | The Map always seems to have 1 or 0 elements.
@@ -117,6 +119,13 @@ getFirstAstFile hieFile =
    in case Map.assocs astMap of
         [] -> "No ASTs"
         (astPath, _) : _ -> (Text.pack . FastString.unpackFS) astPath
+
+initialAstChildrenCount :: HieTypes.HieFile -> Int
+initialAstChildrenCount hieFile =
+  let astMap = (HieTypes.getAsts . HieTypes.hie_asts) hieFile
+   in case Map.assocs astMap of
+        [] -> 0
+        (_, ast) : _ -> (length . HieTypes.nodeChildren) ast
 
 makeUnitIdText :: Module.UnitId -> Text
 makeUnitIdText (Module.IndefiniteUnitId _) = "IndefiniteUnitId"
