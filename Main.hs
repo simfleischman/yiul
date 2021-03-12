@@ -17,10 +17,13 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
 import qualified FastString
+import qualified GHC
+import qualified GHC.Paths
 import HieBin (HieFileResult)
 import qualified HieBin
 import qualified HieTypes
 import qualified Module
+import qualified Name
 import NameCache (NameCache)
 import qualified NameCache
 import qualified SrcLoc
@@ -200,25 +203,39 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
       Text.intercalate
         "\t"
         [ "Span",
-          "AST node constructor",
-          "AST node type"
+          "Node Annotations",
+          "Node Identifiers"
         ]
     handlePair (filePath, hieFileResult) =
       case (getMaybeAst . HieBin.hie_file_result) hieFileResult of
         Nothing -> []
         Just ast -> makeAstLines filePath ast
     makeAstLines filePath ast =
-      let nodeAnnotations = (Set.toList . HieTypes.nodeAnnotations . HieTypes.nodeInfo) ast
-          makeLine srcSpan nodeConstructor nodeType =
+      let nodeInfo = HieTypes.nodeInfo ast
+          nodeAnnotationsText
+            = Text.intercalate ", "
+            . fmap (\(c, t) -> (Text.pack . FastString.unpackFS) c <> "/" <> (Text.pack . FastString.unpackFS) t)
+            . Set.toList
+            . HieTypes.nodeAnnotations
+            $ nodeInfo
+          nodeIdentifiersText
+            = Text.intercalate "; "
+            . fmap (\(identifier, details) -> identifierToText identifier <> " " <> (Text.pack . show . Set.toList . HieTypes.identInfo) details)
+            . Map.assocs
+            $ HieTypes.nodeIdentifiers nodeInfo
+          currentLine =
             Text.intercalate
               "\t"
-              [ realSrcSpanToText srcSpan,
-                (Text.pack . FastString.unpackFS) nodeConstructor,
-                (Text.pack . FastString.unpackFS) nodeType
+              [ (Text.pack . show . HieTypes.nodeSpan) ast,
+                nodeAnnotationsText,
+                nodeIdentifiersText
               ]
-          currentNodeLines = uncurry (makeLine (HieTypes.nodeSpan ast)) <$> nodeAnnotations
           nextLines = concatMap (makeAstLines filePath) (HieTypes.nodeChildren ast)
-       in currentNodeLines <> nextLines
+       in currentLine : nextLines
+
+identifierToText :: Either Module.ModuleName Name.Name -> Text
+identifierToText (Left moduleName) = (Text.pack . Module.moduleNameString) moduleName
+identifierToText (Right name) = (Text.pack . Name.nameStableString) name
 
 realSrcSpanToText :: SrcLoc.RealSrcSpan -> Text
 realSrcSpanToText srcSpan =
@@ -247,6 +264,8 @@ srcLocToText (SrcLoc.UnhelpfulLoc fastString) = "UnhelpfulLoc:" <> (Text.pack . 
 
 main :: IO ()
 main = do
+  _dynFlags <- GHC.runGhc (Just GHC.Paths.libdir) GHC.getSessionDynFlags
+
   args <- Environment.getArgs
   inputPath <-
     case args of
