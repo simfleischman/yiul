@@ -12,6 +12,7 @@ import Data.Foldable (foldrM)
 import Data.Generics.Labels ()
 import Data.Map (Map)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
@@ -26,8 +27,8 @@ import qualified System.Directory as Directory
 import qualified System.Directory.Recursive as Directory.Recursive
 import qualified System.Environment as Environment
 import qualified System.FilePath as FilePath
-import qualified UniqSupply
 import qualified UniqSet
+import qualified UniqSupply
 
 loadHieFiles :: NameCache -> [FilePath] -> IO (NameCache, [(FilePath, HieFileResult)])
 loadHieFiles initialNameCache = foldrM go (initialNameCache, [])
@@ -70,14 +71,14 @@ makeVersionReport = Text.unlines . (headerLine :) . fmap makeLine
           "GHC Version"
         ]
     makeLine (filePath, hieFileResult) =
-      let hieFile =  HieBin.hie_file_result hieFileResult
-      in Text.intercalate
-        "\t"
-        [ Text.pack filePath,
-          (Text.pack . HieTypes.hie_hs_file) hieFile,
-          (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
-          (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
-        ]
+      let hieFile = HieBin.hie_file_result hieFileResult
+       in Text.intercalate
+            "\t"
+            [ Text.pack filePath,
+              (Text.pack . HieTypes.hie_hs_file) hieFile,
+              (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
+              (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
+            ]
 
 makeStatsReport :: [(FilePath, HieFileResult)] -> Text
 makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
@@ -87,23 +88,35 @@ makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
         "\t"
         [ "HIE File",
           "Haskell Source File",
+          "AST filepath",
           "Module UnitId",
           "Module Name",
           "Types used",
-          "Exports"
+          "Exports",
+          "AST filepath count"
         ]
     makeLine (filePath, hieFileResult) =
-      let hieFile =  HieBin.hie_file_result hieFileResult
+      let hieFile = HieBin.hie_file_result hieFileResult
           hieModule = HieTypes.hie_module hieFile
-      in Text.intercalate
-        "\t"
-        [ Text.pack filePath,
-          (Text.pack . HieTypes.hie_hs_file) hieFile,
-          (makeUnitIdText . Module.moduleUnitId) hieModule,
-          (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
-          (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile,
-          (Text.pack . show . UniqSet.sizeUniqSet . Avail.availsToNameSet . HieTypes.hie_exports) hieFile
-        ]
+       in Text.intercalate
+            "\t"
+            [ Text.pack filePath,
+              (Text.pack . HieTypes.hie_hs_file) hieFile,
+              getFirstAstFile hieFile,
+              (makeUnitIdText . Module.moduleUnitId) hieModule,
+              (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
+              (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile,
+              (Text.pack . show . UniqSet.sizeUniqSet . Avail.availsToNameSet . HieTypes.hie_exports) hieFile,
+              (Text.pack . show . Map.size . HieTypes.getAsts . HieTypes.hie_asts) hieFile
+            ]
+
+-- | The Map always seems to have 1 or 0 elements.
+getFirstAstFile :: HieTypes.HieFile -> Text
+getFirstAstFile hieFile =
+  let astMap = (HieTypes.getAsts . HieTypes.hie_asts) hieFile
+   in case Map.assocs astMap of
+        [] -> "No ASTs"
+        (astPath, _) : _ -> (Text.pack . FastString.unpackFS) astPath
 
 makeUnitIdText :: Module.UnitId -> Text
 makeUnitIdText (Module.IndefiniteUnitId _) = "IndefiniteUnitId"
@@ -136,6 +149,17 @@ checkHieVersions hieFileResults = do
       putStrLn "Multiple versions of HIE/GHC found. See version report for details."
       mapM_ (\(hieVersion, ghcVersion) -> putStrLn $ show hieVersion <> " / " <> (Text.unpack . Text.Encoding.decodeUtf8) ghcVersion) versionMapKeys
 
+processASTs :: [(FilePath, HieFileResult)] -> IO ()
+processASTs hieFileResults = do
+  results <- foldrM go Set.empty hieFileResults
+  putStrLn $ "AST key count: " <> (show . Set.size) results
+  when False do
+    mapM_ (putStrLn . FastString.unpackFS) $ take 20 $ Set.toList results
+  where
+    go (_hiePath, hieFileResult) inputSet = do
+      let astMap = (HieTypes.getAsts . HieTypes.hie_asts . HieBin.hie_file_result) hieFileResult
+      pure $ Set.union inputSet (Map.keysSet astMap)
+
 main :: IO ()
 main = do
   args <- Environment.getArgs
@@ -160,3 +184,5 @@ main = do
   checkHieVersions hieFileResults
 
   writeReport (reportsDir <> "stats-report.tsv") makeStatsReport hieFileResults
+
+  processASTs hieFileResults
