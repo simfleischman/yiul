@@ -169,10 +169,17 @@ processASTs hieFileResults = do
   when False do
     mapM_ (putStrLn . FastString.unpackFS) astFilePathSet
 
-  let topLevelNodeInfos = concatMap (maybe [] (pure . HieTypes.nodeInfo) . getMaybeAst . HieBin.hie_file_result . snd) hieFileResults
+  let topLevelAsts = concatMap (maybe [] pure . getMaybeAst . HieBin.hie_file_result . snd) hieFileResults
+      topLevelNodeInfos = HieTypes.nodeInfo <$> topLevelAsts
   let topLevelNodePairs = foldr buildNodeConstructorNodeTypePairs Set.empty topLevelNodeInfos
   putStrLn $ "Top-level node constructor/type pair count: " <> (show . Set.size) topLevelNodePairs
   mapM_ (\(ctr, typ) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ) topLevelNodePairs
+
+
+  let subModuleTopLevelNodeInfos = HieTypes.nodeInfo <$> concatMap HieTypes.nodeChildren topLevelAsts
+      subModuleTopLevelNodeInfoSet = foldr buildNodeConstructorNodeTypePairs Set.empty subModuleTopLevelNodeInfos
+  putStrLn $ "Sub-module node constructor/type pair count: " <> (show . Set.size) subModuleTopLevelNodeInfoSet
+  mapM_ (\(ctr, typ) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ) subModuleTopLevelNodeInfoSet
 
   where
     buildAstFilePathSet (_hiePath, hieFileResult) inputSet =
