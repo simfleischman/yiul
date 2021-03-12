@@ -1,6 +1,6 @@
 # yiul
 
-Haskell modularity tool. Named after the Hebrew word [יועל](https://www.morfix.co.il/en/%D7%99%D7%A2%D7%95%D7%9C) meaning "making efficient, improving".
+Haskell modularity tool. Named after the Hebrew word [יעול](https://www.morfix.co.il/en/%D7%99%D7%A2%D7%95%D7%9C) meaning "making efficient, improving".
 
 Build with `-fwrite-ide-info` to generate .hie files.
 ```
