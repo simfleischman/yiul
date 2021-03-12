@@ -23,6 +23,7 @@ import qualified HieTypes
 import qualified Module
 import NameCache (NameCache)
 import qualified NameCache
+import qualified SrcLoc
 import qualified System.Directory as Directory
 import qualified System.Directory.Recursive as Directory.Recursive
 import qualified System.Environment as Environment
@@ -177,22 +178,72 @@ processASTs hieFileResults = do
     (\((ctr, typ), ct) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ <> " : " <> show ct)
     (Map.assocs topLevelNodePairs)
 
-
   let subModuleTopLevelNodeInfos = HieTypes.nodeInfo <$> concatMap HieTypes.nodeChildren topLevelAsts
       subModuleTopLevelNodeInfoMap = foldr buildNodeConstructorNodeTypePairCount Map.empty subModuleTopLevelNodeInfos
   putStrLn $ "Sub-module node constructor/type pair count: " <> (show . Map.size) subModuleTopLevelNodeInfoMap
   mapM_
     (\((ctr, typ), ct) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ <> " : " <> show ct)
     (Map.assocs subModuleTopLevelNodeInfoMap)
-
   where
     buildAstFilePathSet (_hiePath, hieFileResult) inputSet =
       let astMap = (HieTypes.getAsts . HieTypes.hie_asts . HieBin.hie_file_result) hieFileResult
-      in Set.union inputSet (Map.keysSet astMap)
+       in Set.union inputSet (Map.keysSet astMap)
 
     buildNodeConstructorNodeTypePairCount nodeInfo inputMap =
       let maps = Map.fromSet (const (1 :: Int)) (HieTypes.nodeAnnotations nodeInfo)
-      in Map.unionsWith (+) [inputMap, maps]
+       in Map.unionsWith (+) [inputMap, maps]
+
+makeAstStatsReport :: [(FilePath, HieFileResult)] -> Text
+makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
+  where
+    headerLine =
+      Text.intercalate
+        "\t"
+        [ "Span",
+          "AST node constructor",
+          "AST node type"
+        ]
+    handlePair (filePath, hieFileResult) =
+      case (getMaybeAst . HieBin.hie_file_result) hieFileResult of
+        Nothing -> []
+        Just ast -> makeAstLines filePath ast
+    makeAstLines filePath ast =
+      let nodeAnnotations = (Set.toList . HieTypes.nodeAnnotations . HieTypes.nodeInfo) ast
+          makeLine srcSpan nodeConstructor nodeType =
+            Text.intercalate
+              "\t"
+              [ realSrcSpanToText srcSpan,
+                (Text.pack . FastString.unpackFS) nodeConstructor,
+                (Text.pack . FastString.unpackFS) nodeType
+              ]
+          currentNodeLines = uncurry (makeLine (HieTypes.nodeSpan ast)) <$> nodeAnnotations
+          nextLines = concatMap (makeAstLines filePath) (HieTypes.nodeChildren ast)
+       in currentNodeLines <> nextLines
+
+realSrcSpanToText :: SrcLoc.RealSrcSpan -> Text
+realSrcSpanToText srcSpan =
+  (realSrcLocToText . SrcLoc.realSrcSpanStart) srcSpan
+    <> "-"
+    <> (Text.pack . show . SrcLoc.srcLocLine . SrcLoc.realSrcSpanEnd) srcSpan
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocCol . SrcLoc.realSrcSpanEnd) srcSpan
+
+realSrcLocToText :: SrcLoc.RealSrcLoc -> Text
+realSrcLocToText loc =
+  (Text.pack . FastString.unpackFS . SrcLoc.srcLocFile) loc
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocLine) loc
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocCol) loc
+
+srcLocToText :: SrcLoc.SrcLoc -> Text
+srcLocToText (SrcLoc.RealSrcLoc loc) =
+  (Text.pack . FastString.unpackFS . SrcLoc.srcLocFile) loc
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocLine) loc
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocCol) loc
+srcLocToText (SrcLoc.UnhelpfulLoc fastString) = "UnhelpfulLoc:" <> (Text.pack . FastString.unpackFS) fastString
 
 main :: IO ()
 main = do
@@ -220,3 +271,4 @@ main = do
   writeReport (reportsDir <> "stats-report.tsv") makeStatsReport hieFileResults
 
   processASTs hieFileResults
+  writeReport (reportsDir <> "ast-report.tsv") makeAstStatsReport hieFileResults
