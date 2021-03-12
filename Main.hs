@@ -121,11 +121,14 @@ getFirstAstFile hieFile =
         (astPath, _) : _ -> (Text.pack . FastString.unpackFS) astPath
 
 initialAstChildrenCount :: HieTypes.HieFile -> Int
-initialAstChildrenCount hieFile =
+initialAstChildrenCount hieFile = maybe 0 (length . HieTypes.nodeChildren) (getMaybeAst hieFile)
+
+getMaybeAst :: HieTypes.HieFile -> Maybe (HieTypes.HieAST HieTypes.TypeIndex)
+getMaybeAst hieFile =
   let astMap = (HieTypes.getAsts . HieTypes.hie_asts) hieFile
    in case Map.assocs astMap of
-        [] -> 0
-        (_, ast) : _ -> (length . HieTypes.nodeChildren) ast
+        [] -> Nothing
+        (_, ast) : _ -> Just ast
 
 makeUnitIdText :: Module.UnitId -> Text
 makeUnitIdText (Module.IndefiniteUnitId _) = "IndefiniteUnitId"
@@ -160,14 +163,25 @@ checkHieVersions hieFileResults = do
 
 processASTs :: [(FilePath, HieFileResult)] -> IO ()
 processASTs hieFileResults = do
-  results <- foldrM go Set.empty hieFileResults
-  putStrLn $ "AST key count: " <> (show . Set.size) results
+  let astFilePathSet = foldr buildAstFilePathSet Set.empty hieFileResults
+  putStrLn $ "AST key count: " <> (show . Set.size) astFilePathSet
+
   when False do
-    mapM_ (putStrLn . FastString.unpackFS) $ take 20 $ Set.toList results
+    mapM_ (putStrLn . FastString.unpackFS) astFilePathSet
+
+  let topLevelNodeInfos = concatMap (maybe [] (pure . HieTypes.nodeInfo) . getMaybeAst . HieBin.hie_file_result . snd) hieFileResults
+  let topLevelNodePairs = foldr buildNodeConstructorNodeTypePairs Set.empty topLevelNodeInfos
+  putStrLn $ "Top-level node constructor/type pair count: " <> (show . Set.size) topLevelNodePairs
+  mapM_ (\(ctr, typ) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ) topLevelNodePairs
+
   where
-    go (_hiePath, hieFileResult) inputSet = do
+    buildAstFilePathSet (_hiePath, hieFileResult) inputSet =
       let astMap = (HieTypes.getAsts . HieTypes.hie_asts . HieBin.hie_file_result) hieFileResult
-      pure $ Set.union inputSet (Map.keysSet astMap)
+      in Set.union inputSet (Map.keysSet astMap)
+
+    buildNodeConstructorNodeTypePairs nodeInfo inputSet =
+      let pairSet = HieTypes.nodeAnnotations nodeInfo
+      in Set.union inputSet pairSet
 
 main :: IO ()
 main = do
