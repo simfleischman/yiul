@@ -171,24 +171,28 @@ processASTs hieFileResults = do
 
   let topLevelAsts = concatMap (maybe [] pure . getMaybeAst . HieBin.hie_file_result . snd) hieFileResults
       topLevelNodeInfos = HieTypes.nodeInfo <$> topLevelAsts
-  let topLevelNodePairs = foldr buildNodeConstructorNodeTypePairs Set.empty topLevelNodeInfos
-  putStrLn $ "Top-level node constructor/type pair count: " <> (show . Set.size) topLevelNodePairs
-  mapM_ (\(ctr, typ) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ) topLevelNodePairs
+  let topLevelNodePairs = foldr buildNodeConstructorNodeTypePairCount Map.empty topLevelNodeInfos
+  putStrLn $ "Top-level node constructor/type pair count: " <> (show . Map.size) topLevelNodePairs
+  mapM_
+    (\((ctr, typ), ct) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ <> " : " <> show ct)
+    (Map.assocs topLevelNodePairs)
 
 
   let subModuleTopLevelNodeInfos = HieTypes.nodeInfo <$> concatMap HieTypes.nodeChildren topLevelAsts
-      subModuleTopLevelNodeInfoSet = foldr buildNodeConstructorNodeTypePairs Set.empty subModuleTopLevelNodeInfos
-  putStrLn $ "Sub-module node constructor/type pair count: " <> (show . Set.size) subModuleTopLevelNodeInfoSet
-  mapM_ (\(ctr, typ) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ) subModuleTopLevelNodeInfoSet
+      subModuleTopLevelNodeInfoMap = foldr buildNodeConstructorNodeTypePairCount Map.empty subModuleTopLevelNodeInfos
+  putStrLn $ "Sub-module node constructor/type pair count: " <> (show . Map.size) subModuleTopLevelNodeInfoMap
+  mapM_
+    (\((ctr, typ), ct) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ <> " : " <> show ct)
+    (Map.assocs subModuleTopLevelNodeInfoMap)
 
   where
     buildAstFilePathSet (_hiePath, hieFileResult) inputSet =
       let astMap = (HieTypes.getAsts . HieTypes.hie_asts . HieBin.hie_file_result) hieFileResult
       in Set.union inputSet (Map.keysSet astMap)
 
-    buildNodeConstructorNodeTypePairs nodeInfo inputSet =
-      let pairSet = HieTypes.nodeAnnotations nodeInfo
-      in Set.union inputSet pairSet
+    buildNodeConstructorNodeTypePairCount nodeInfo inputMap =
+      let maps = Map.fromSet (const (1 :: Int)) (HieTypes.nodeAnnotations nodeInfo)
+      in Map.unionsWith (+) [inputMap, maps]
 
 main :: IO ()
 main = do
