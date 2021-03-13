@@ -1,5 +1,5 @@
 module Main where
-  
+
 import qualified Yiul.Main
 
 main :: IO ()
