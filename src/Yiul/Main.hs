@@ -1,7 +1,7 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Main where
+module Yiul.Main where
 
 import qualified Avail
 import Control.Applicative (Alternative (..))
