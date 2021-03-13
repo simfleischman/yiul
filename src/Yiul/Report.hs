@@ -9,6 +9,7 @@ import qualified Data.Array as Array
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Generics.Labels ()
+import qualified Data.List as List
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -139,22 +140,27 @@ processASTs hieFileResults = do
   let topLevelNodePairs = foldr buildNodeConstructorNodeTypePairCount Map.empty topLevelNodeInfos
   putStrLn $ "Top-level node constructor/type pair count: " <> (show . Map.size) topLevelNodePairs
   mapM_
-    (\((ctr, typ), ct) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ <> " : " <> show ct)
+    (\(pair, ct) -> putStrLn $ pairToString pair <> " : " <> show ct)
     (Map.assocs topLevelNodePairs)
 
   let subModuleTopLevelNodeInfos = HieTypes.nodeInfo <$> concatMap HieTypes.nodeChildren topLevelAsts
-      subModuleTopLevelNodeInfoMap = foldr buildNodeConstructorNodeTypePairCount Map.empty subModuleTopLevelNodeInfos
+      subModuleTopLevelNodeInfoMap = foldr buildAnnotationPairs Map.empty subModuleTopLevelNodeInfos
   putStrLn $ "Sub-module node constructor/type pair count: " <> (show . Map.size) subModuleTopLevelNodeInfoMap
   mapM_
-    (\((ctr, typ), ct) -> putStrLn $ FastString.unpackFS ctr <> " / " <> FastString.unpackFS typ <> " : " <> show ct)
+    (\(pairSet, ct) -> putStrLn $ (List.intercalate ", " . fmap pairToString . Set.toList) pairSet <> " : " <> show ct)
     (Map.assocs subModuleTopLevelNodeInfoMap)
   where
+    pairToString (ctr, typ) = FastString.unpackFS ctr <> "/" <> FastString.unpackFS typ
     buildAstFilePathSet (_hiePath, hieFileResult) inputSet =
       let astMap = (HieTypes.getAsts . HieTypes.hie_asts . HieBin.hie_file_result) hieFileResult
        in Set.union inputSet (Map.keysSet astMap)
 
     buildNodeConstructorNodeTypePairCount nodeInfo inputMap =
       let maps = Map.fromSet (const (1 :: Int)) (HieTypes.nodeAnnotations nodeInfo)
+       in Map.unionsWith (+) [inputMap, maps]
+
+    buildAnnotationPairs nodeInfo inputMap =
+      let maps = Map.singleton (HieTypes.nodeAnnotations nodeInfo) (1 :: Int)
        in Map.unionsWith (+) [inputMap, maps]
 
 makeAstStatsReport :: [(FilePath, HieFileResult)] -> Text
@@ -166,6 +172,7 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
         [ "Span",
           "Node Annotations",
           "Node Children Count",
+          "Node Type Count",
           "Modules",
           "Node Identifiers"
         ]
@@ -197,6 +204,7 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
               [ (Text.pack . show . HieTypes.nodeSpan) ast,
                 nodeAnnotationsText,
                 (Text.pack . show . length . HieTypes.nodeChildren) ast,
+                (Text.pack . show . length . HieTypes.nodeType . HieTypes.nodeInfo) ast,
                 modulesText,
                 nodeIdentifiersText
               ]
