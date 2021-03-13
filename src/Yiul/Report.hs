@@ -165,6 +165,7 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
         "\t"
         [ "Span",
           "Node Annotations",
+          "Node Children Count",
           "Modules",
           "Node Identifiers"
         ]
@@ -195,6 +196,7 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
               "\t"
               [ (Text.pack . show . HieTypes.nodeSpan) ast,
                 nodeAnnotationsText,
+                (Text.pack . show . length . HieTypes.nodeChildren) ast,
                 modulesText,
                 nodeIdentifiersText
               ]
