@@ -8,6 +8,7 @@ dependencies:
 - array
 - base
 - bytestring
+- Cabal
 - containers
 - dir-traverse
 - directory
