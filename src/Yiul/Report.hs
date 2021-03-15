@@ -24,6 +24,7 @@ import qualified Module
 import qualified Name
 import qualified SrcLoc
 import qualified UniqSet
+import Prelude hiding (span)
 
 makeVersionReport :: [(FilePath, HieFileResult)] -> Text
 makeVersionReport = Text.unlines . (headerLine :) . fmap makeLine
@@ -211,6 +212,56 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
           nextLines = concatMap (makeAstLines filePath) (HieTypes.nodeChildren ast)
        in currentLine : nextLines
 
+makeTopLevelBindingReport :: [(FilePath, HieFileResult)] -> Text
+makeTopLevelBindingReport = Text.unlines . (headerLine :) . concatMap handlePair
+  where
+    headerLine =
+      Text.intercalate
+        "\t"
+        [ "Span",
+          "End",
+          "Node Annotations",
+          "Descendants",
+          "Lines"
+        ]
+    handlePair (filePath, hieFileResult) =
+      case (getMaybeAst . HieBin.hie_file_result) hieFileResult of
+        Nothing -> []
+        Just ast ->
+          if (HieTypes.nodeAnnotations . HieTypes.nodeInfo) ast == Set.singleton ("Module", "Module")
+            then
+              concatMap
+                (makeLines filePath)
+                $ filter
+                  ( Set.null
+                      . Set.intersection
+                        (Set.fromList ["IEName", "IEThingWith", "ImportDecl"]) -- ignore exports and imports
+                      . Set.map fst
+                      . HieTypes.nodeAnnotations
+                      . HieTypes.nodeInfo
+                  )
+                  $ HieTypes.nodeChildren ast
+            else makeLines filePath ast
+    recursiveAstCount ast = (1 :: Int) + sum (recursiveAstCount <$> HieTypes.nodeChildren ast)
+    makeLines _filePath ast =
+      let nodeInfo = HieTypes.nodeInfo ast
+          nodeAnnotationsText =
+            Text.intercalate ", "
+              . fmap (\(c, t) -> (Text.pack . FastString.unpackFS) c <> "/" <> (Text.pack . FastString.unpackFS) t)
+              . Set.toList
+              . HieTypes.nodeAnnotations
+              $ nodeInfo
+          currentLine =
+            Text.intercalate
+              "\t"
+              [ (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
+                (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
+                nodeAnnotationsText,
+                (Text.pack . show . recursiveAstCount) ast,
+                (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast
+              ]
+       in [currentLine]
+
 identifierToText :: Either Module.ModuleName Name.Name -> Text
 identifierToText (Left moduleName) = (Text.pack . Module.moduleNameString) moduleName
 identifierToText (Right name) = (Text.pack . Name.nameStableString) name
@@ -236,6 +287,12 @@ realSrcLocToText loc =
   (Text.pack . FastString.unpackFS . SrcLoc.srcLocFile) loc
     <> ":"
     <> (Text.pack . show . SrcLoc.srcLocLine) loc
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocCol) loc
+
+realSrcLocToLineColText :: SrcLoc.RealSrcLoc -> Text
+realSrcLocToLineColText loc =
+  (Text.pack . show . SrcLoc.srcLocLine) loc
     <> ":"
     <> (Text.pack . show . SrcLoc.srcLocCol) loc
 

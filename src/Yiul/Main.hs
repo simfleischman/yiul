@@ -85,6 +85,8 @@ run projectDir mHieFileListPath mGhcPkgDump astReportFlag = do
 
   Yiul.Report.writeReport (reportsDir </> "stats-report.tsv") Yiul.Report.makeStatsReport hieFileResults
 
+  Yiul.Report.writeReport (reportsDir </> "top-level-binding-report.tsv") Yiul.Report.makeTopLevelBindingReport hieFileResults
+
   when astReportFlag do
     Yiul.Report.processASTs hieFileResults
     Yiul.Report.writeReport (reportsDir </> "ast-report.tsv") Yiul.Report.makeAstStatsReport hieFileResults
