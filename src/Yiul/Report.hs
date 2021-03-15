@@ -1,9 +1,11 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Yiul.Report where
 
 import qualified Avail
+import qualified Control.Lens as Lens
 import Control.Monad (when)
 import qualified Data.Array as Array
 import Data.ByteString (ByteString)
@@ -29,57 +31,49 @@ import Yiul.Const
 import Prelude hiding (span)
 
 makeVersionReport :: [(HieFilePath, HieFileResult)] -> Text
-makeVersionReport = Text.unlines . (headerLine :) . fmap makeLine
+makeVersionReport = makeTsv . (headerLine :) . fmap makeLine
   where
     headerLine =
-      Text.intercalate
-        "\t"
-        [ "HIE File",
-          "Haskell Source File",
-          "HIE File Version",
-          "GHC Version"
-        ]
+      ( "HIE File",
+        "Haskell Source File",
+        "HIE File Version",
+        "GHC Version"
+      )
     makeLine (filePath, hieFileResult) =
       let hieFile = HieBin.hie_file_result hieFileResult
-       in Text.intercalate
-            "\t"
-            [ (Text.pack . unConst) filePath,
-              (Text.pack . HieTypes.hie_hs_file) hieFile,
-              (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
-              (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
-            ]
+       in ( (Text.pack . unConst) filePath,
+            (Text.pack . HieTypes.hie_hs_file) hieFile,
+            (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
+            (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
+          )
 
 makeStatsReport :: [(HieFilePath, HieFileResult)] -> Text
-makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
+makeStatsReport = makeTsv . (headerLine :) . fmap makeLine
   where
     headerLine =
-      Text.intercalate
-        "\t"
-        [ "HIE File",
-          "Haskell Source File",
-          "AST filepath",
-          "Module UnitId",
-          "Module Name",
-          "Types used",
-          "Exports",
-          "AST filepath count",
-          "AST top-level children"
-        ]
+      ( "HIE File",
+        "Haskell Source File",
+        "AST filepath",
+        "Module UnitId",
+        "Module Name",
+        "Types used",
+        "Exports",
+        "AST filepath count",
+        "AST top-level children"
+      )
     makeLine (filePath, hieFileResult) =
       let hieFile = HieBin.hie_file_result hieFileResult
           hieModule = HieTypes.hie_module hieFile
-       in Text.intercalate
-            "\t"
-            [ (Text.pack . unConst) filePath,
-              (Text.pack . HieTypes.hie_hs_file) hieFile,
-              getFirstAstFile hieFile,
-              (makeUnitIdText . Module.moduleUnitId) hieModule,
-              (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
-              (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile,
-              (Text.pack . show . UniqSet.sizeUniqSet . Avail.availsToNameSet . HieTypes.hie_exports) hieFile,
-              (Text.pack . show . Map.size . HieTypes.getAsts . HieTypes.hie_asts) hieFile,
-              (Text.pack . show . initialAstChildrenCount) hieFile
-            ]
+       in ( (Text.pack . unConst) filePath,
+            (Text.pack . HieTypes.hie_hs_file) hieFile,
+            getFirstAstFile hieFile,
+            (makeUnitIdText . Module.moduleUnitId) hieModule,
+            (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
+            (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile,
+            (Text.pack . show . UniqSet.sizeUniqSet . Avail.availsToNameSet . HieTypes.hie_exports) hieFile,
+            (Text.pack . show . Map.size . HieTypes.getAsts . HieTypes.hie_asts) hieFile,
+            (Text.pack . show . initialAstChildrenCount) hieFile
+          )
 
 -- | The Map always seems to have 1 or 0 elements.
 getFirstAstFile :: HieTypes.HieFile -> Text
@@ -166,20 +160,21 @@ processASTs hieFileResults = do
       let maps = Map.singleton (HieTypes.nodeAnnotations nodeInfo) (1 :: Int)
        in Map.unionsWith (+) [inputMap, maps]
 
+makeTsv :: Lens.Each s s Text Text => [s] -> Text
+makeTsv = Text.unlines . fmap (Text.intercalate "\t" . Lens.toListOf Lens.each)
+
 makeAstStatsReport :: [(HieFilePath, HieFileResult)] -> Text
-makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
+makeAstStatsReport = makeTsv . (headerLine :) . concatMap handlePair
   where
     headerLine =
-      Text.intercalate
-        "\t"
-        [ "Span",
-          "End",
-          "Node Annotations",
-          "Node Children Count",
-          "Node Type Count",
-          "Modules",
-          "Node Identifiers"
-        ]
+      ( "Span",
+        "End",
+        "Node Annotations",
+        "Node Children Count",
+        "Node Type Count",
+        "Modules",
+        "Node Identifiers"
+      )
     handlePair (filePath, hieFileResult) =
       case (getMaybeAst . HieBin.hie_file_result) hieFileResult of
         Nothing -> []
@@ -203,33 +198,29 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
               . Map.keys
               $ HieTypes.nodeIdentifiers nodeInfo
           currentLine =
-            Text.intercalate
-              "\t"
-              [ (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
-                (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
-                nodeAnnotationsText,
-                (Text.pack . show . length . HieTypes.nodeChildren) ast,
-                (Text.pack . show . length . HieTypes.nodeType . HieTypes.nodeInfo) ast,
-                modulesText,
-                nodeIdentifiersText
-              ]
+            ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
+              (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
+              nodeAnnotationsText,
+              (Text.pack . show . length . HieTypes.nodeChildren) ast,
+              (Text.pack . show . length . HieTypes.nodeType . HieTypes.nodeInfo) ast,
+              modulesText,
+              nodeIdentifiersText
+            )
           nextLines = concatMap (makeAstLines filePath) (HieTypes.nodeChildren ast)
        in currentLine : nextLines
 
 makeTopLevelBindingReport :: [(HieFilePath, HieFileResult)] -> Text
-makeTopLevelBindingReport = Text.unlines . (headerLine :) . concatMap handlePair
+makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
   where
     headerLine =
-      Text.intercalate
-        "\t"
-        [ "Span",
-          "End",
-          "Node Annotations",
-          "Descendants",
-          "Lines",
-          "UnitId Count",
-          "UnitIds"
-        ]
+      ( "Span",
+        "End",
+        "Node Annotations",
+        "Descendants",
+        "Lines",
+        "UnitId Count",
+        "UnitIds"
+      )
     handlePair (filePath, hieFileResult) =
       case (getMaybeAst . HieBin.hie_file_result) hieFileResult of
         Nothing -> []
@@ -268,16 +259,14 @@ makeTopLevelBindingReport = Text.unlines . (headerLine :) . concatMap handlePair
               $ nodeInfo
           unitIds = unitIdsInAst ast
           currentLine =
-            Text.intercalate
-              "\t"
-              [ (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
-                (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
-                nodeAnnotationsText,
-                (Text.pack . show . recursiveAstCount) ast,
-                (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast,
-                (Text.pack . show . Set.size) unitIds,
-                (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) unitIds
-              ]
+            ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
+              (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
+              nodeAnnotationsText,
+              (Text.pack . show . recursiveAstCount) ast,
+              (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast,
+              (Text.pack . show . Set.size) unitIds,
+              (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) unitIds
+            )
        in [currentLine]
 
 identifierToText :: Either Module.ModuleName Name.Name -> Text
