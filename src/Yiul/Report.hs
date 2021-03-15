@@ -252,54 +252,6 @@ makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
                       $ HieTypes.nodeChildren ast
                 else makeLines hieFile ast
     recursiveAstCount ast = (1 :: Int) + sum (recursiveAstCount <$> HieTypes.nodeChildren ast)
-    identifierToUnitIdSet (Left _moduleName) = Set.empty
-    identifierToUnitIdSet (Right name) = nameToUnitIdSet name
-    nameToUnitIdSet :: Name.Name -> Set Module.UnitId
-    nameToUnitIdSet = Set.fromList . fmap Module.moduleUnitId . Maybe.maybeToList . Name.nameModule_maybe
-    typeIndexSetForAst :: HieTypes.HieAST HieTypes.TypeIndex -> Set HieTypes.TypeIndex
-    typeIndexSetForAst ast =
-      let nodeInfo = HieTypes.nodeInfo ast
-          nodeTypeIndexSet = Set.fromList . HieTypes.nodeType $ nodeInfo
-          identifierDetails :: Set HieTypes.TypeIndex
-          identifierDetails = Set.fromList . Maybe.mapMaybe HieTypes.identType . Map.elems . HieTypes.nodeIdentifiers $ nodeInfo
-          nodeChildren = HieTypes.nodeChildren ast
-          childrenSets = typeIndexSetForAst <$> nodeChildren
-       in nodeTypeIndexSet <> identifierDetails <> Set.unions childrenSets
-    hieArgsToIndexSet :: HieTypes.HieArgs HieTypes.TypeIndex -> Set HieTypes.TypeIndex
-    hieArgsToIndexSet (HieTypes.HieArgs pairs) = Set.fromList (snd <$> pairs) -- FIXME? only return visible args here? (where fst == True)
-    unitIdPairsForHieType :: HieTypes.HieType HieTypes.TypeIndex -> (Set Module.UnitId, Set HieTypes.TypeIndex)
-    unitIdPairsForHieType (HieTypes.HTyVarTy name) = (nameToUnitIdSet name, Set.empty)
-    unitIdPairsForHieType (HieTypes.HAppTy index1 args) = (Set.empty, Set.insert index1 (hieArgsToIndexSet args))
-    unitIdPairsForHieType (HieTypes.HTyConApp ifaceTyCon args) = ((nameToUnitIdSet . IfaceType.ifaceTyConName) ifaceTyCon, hieArgsToIndexSet args)
-    unitIdPairsForHieType (HieTypes.HForAllTy ((name, index1), _argFlag) index2) = (nameToUnitIdSet name, Set.fromList [index1, index2])
-    unitIdPairsForHieType (HieTypes.HFunTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
-    unitIdPairsForHieType (HieTypes.HQualTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
-    unitIdPairsForHieType (HieTypes.HLitTy _ifaceTyLit) = (Set.empty, Set.empty)
-    unitIdPairsForHieType (HieTypes.HCastTy index) = (Set.empty, Set.singleton index)
-    unitIdPairsForHieType HieTypes.HCoercionTy = (Set.empty, Set.empty)
-    unitIdsForTypeIndex :: HieTypes.HieFile -> Set HieTypes.TypeIndex -> Set Module.UnitId
-    unitIdsForTypeIndex hieFile typeIndexSet = go Set.empty typeIndexSet Set.empty
-      where
-        go visited toVisit resultSet =
-          if Set.null toVisit
-            then resultSet
-            else
-              let (currentSet, moreToVisit) = Set.splitAt 1 toVisit
-                  currentIndex = Set.elemAt 0 currentSet
-               in if Set.member currentIndex visited
-                    then go visited moreToVisit resultSet
-                    else
-                      let typ = HieTypes.hie_types hieFile ! currentIndex
-                          (currentResults, extraToVisit) = unitIdPairsForHieType typ
-                          extraToVisitMinusCurrent = Set.delete currentIndex extraToVisit
-                       in go (Set.insert currentIndex visited) (Set.union moreToVisit extraToVisitMinusCurrent) (Set.union currentResults resultSet)
-    termUnitIdSet ast =
-      mconcat
-        ( fmap
-            identifierToUnitIdSet
-            (Map.keys . HieTypes.nodeIdentifiers . HieTypes.nodeInfo $ ast)
-        )
-        <> mconcat (fmap termUnitIdSet (HieTypes.nodeChildren ast))
     makeLines hieFile ast =
       let nodeInfo = HieTypes.nodeInfo ast
           nodeAnnotationsText =
@@ -323,6 +275,63 @@ makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
               (Text.pack . show . Set.size) (Set.union termUnitIds typeUnitIds)
             )
        in [currentLine]
+
+nameToUnitIdSet :: Name.Name -> Set Module.UnitId
+nameToUnitIdSet = Set.fromList . fmap Module.moduleUnitId . Maybe.maybeToList . Name.nameModule_maybe
+
+typeIndexSetForAst :: HieTypes.HieAST HieTypes.TypeIndex -> Set HieTypes.TypeIndex
+typeIndexSetForAst ast =
+  let nodeInfo = HieTypes.nodeInfo ast
+      nodeTypeIndexSet = Set.fromList . HieTypes.nodeType $ nodeInfo
+      identifierDetails :: Set HieTypes.TypeIndex
+      identifierDetails = Set.fromList . Maybe.mapMaybe HieTypes.identType . Map.elems . HieTypes.nodeIdentifiers $ nodeInfo
+      nodeChildren = HieTypes.nodeChildren ast
+      childrenSets = typeIndexSetForAst <$> nodeChildren
+    in nodeTypeIndexSet <> identifierDetails <> Set.unions childrenSets
+
+hieArgsToIndexSet :: HieTypes.HieArgs HieTypes.TypeIndex -> Set HieTypes.TypeIndex
+hieArgsToIndexSet (HieTypes.HieArgs pairs) = Set.fromList (snd <$> pairs) -- FIXME? only return visible args here? (where fst == True)
+
+unitIdPairsForHieType :: HieTypes.HieType HieTypes.TypeIndex -> (Set Module.UnitId, Set HieTypes.TypeIndex)
+unitIdPairsForHieType (HieTypes.HTyVarTy name) = (nameToUnitIdSet name, Set.empty)
+unitIdPairsForHieType (HieTypes.HAppTy index1 args) = (Set.empty, Set.insert index1 (hieArgsToIndexSet args))
+unitIdPairsForHieType (HieTypes.HTyConApp ifaceTyCon args) = ((nameToUnitIdSet . IfaceType.ifaceTyConName) ifaceTyCon, hieArgsToIndexSet args)
+unitIdPairsForHieType (HieTypes.HForAllTy ((name, index1), _argFlag) index2) = (nameToUnitIdSet name, Set.fromList [index1, index2])
+unitIdPairsForHieType (HieTypes.HFunTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
+unitIdPairsForHieType (HieTypes.HQualTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
+unitIdPairsForHieType (HieTypes.HLitTy _ifaceTyLit) = (Set.empty, Set.empty)
+unitIdPairsForHieType (HieTypes.HCastTy index) = (Set.empty, Set.singleton index)
+unitIdPairsForHieType HieTypes.HCoercionTy = (Set.empty, Set.empty)
+
+unitIdsForTypeIndex :: HieTypes.HieFile -> Set HieTypes.TypeIndex -> Set Module.UnitId
+unitIdsForTypeIndex hieFile typeIndexSet = go Set.empty typeIndexSet Set.empty
+  where
+    go visited toVisit resultSet =
+      if Set.null toVisit
+        then resultSet
+        else
+          let (currentSet, moreToVisit) = Set.splitAt 1 toVisit
+              currentIndex = Set.elemAt 0 currentSet
+            in if Set.member currentIndex visited
+                then go visited moreToVisit resultSet
+                else
+                  let typ = HieTypes.hie_types hieFile ! currentIndex
+                      (currentResults, extraToVisit) = unitIdPairsForHieType typ
+                      extraToVisitMinusCurrent = Set.delete currentIndex extraToVisit
+                    in go (Set.insert currentIndex visited) (Set.union moreToVisit extraToVisitMinusCurrent) (Set.union currentResults resultSet)
+
+termUnitIdSet :: HieTypes.HieAST a -> Set Module.UnitId
+termUnitIdSet ast =
+  mconcat
+    ( fmap
+        identifierToUnitIdSet
+        (Map.keys . HieTypes.nodeIdentifiers . HieTypes.nodeInfo $ ast)
+    )
+    <> mconcat (fmap termUnitIdSet (HieTypes.nodeChildren ast))
+
+identifierToUnitIdSet :: Either a Name.Name -> Set Module.UnitId
+identifierToUnitIdSet (Left _moduleName) = Set.empty
+identifierToUnitIdSet (Right name) = nameToUnitIdSet name
 
 identifierToText :: Either Module.ModuleName Name.Name -> Text
 identifierToText (Left moduleName) = (Text.pack . Module.moduleNameString) moduleName
