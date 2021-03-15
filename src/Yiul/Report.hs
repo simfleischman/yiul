@@ -235,7 +235,7 @@ makeTopLevelBindingReport = Text.unlines . (headerLine :) . concatMap handlePair
                 $ filter
                   ( Set.null
                       . Set.intersection
-                        (Set.fromList ["IEName", "IEThingWith", "ImportDecl"]) -- ignore exports and imports
+                        (Set.fromList ["IEName", "IEThingWith", "IEThingAll", "IEModuleContents", "ImportDecl"]) -- ignore exports and imports
                       . Set.map fst
                       . HieTypes.nodeAnnotations
                       . HieTypes.nodeInfo
