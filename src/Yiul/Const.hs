@@ -27,6 +27,10 @@ type HieFilePath = Const FilePath "HieFilePath"
 
 type AstReportFlag = Const Bool "AstReportFlag"
 
+type TopLevelBindingPackageReportFlag = Const Bool "TopLevelBindingPackageReportFlag"
+
+type TopLevelBindingModuleReportFlag = Const Bool "TopLevelBindingModuleReportFlag"
+
 mkConst :: forall t (s :: Symbol) a. (t ~ Const a s) => a -> t
 mkConst = Const
 

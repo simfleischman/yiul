@@ -217,8 +217,8 @@ makeAstStatsReport = makeTsv . (headerLine :) . concatMap handlePair
           nextLines = concatMap (makeAstLines filePath) (HieTypes.nodeChildren ast)
        in currentLine : nextLines
 
-makeTopLevelBindingReport :: [(HieFilePath, HieFileResult)] -> Text
-makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
+makeTopLevelBindingPackageReport :: [(HieFilePath, HieFileResult)] -> Text
+makeTopLevelBindingPackageReport = makeTsv . (headerLine :) . concatMap handlePair
   where
     headerLine =
       ( "Span",
@@ -280,6 +280,56 @@ makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
               (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) visibleTypeUnitIds,
               (Text.pack . show . Set.size) (Set.union termUnitIds allTypeUnitIds),
               (Text.pack . show . Set.size) (Set.union termUnitIds visibleTypeUnitIds)
+            )
+       in [currentLine]
+
+makeTopLevelBindingModuleReport :: [(HieFilePath, HieFileResult)] -> Text
+makeTopLevelBindingModuleReport = makeTsv . (headerLine :) . concatMap handlePair
+  where
+    headerLine =
+      ( "Span",
+        "End",
+        "Node Annotations",
+        "Descendants",
+        "Lines"
+      )
+    handlePair (_filePath, hieFileResult) =
+      let hieFile = HieBin.hie_file_result hieFileResult
+       in case getMaybeAst hieFile of
+            Nothing -> []
+            Just ast ->
+              if (HieTypes.nodeAnnotations . HieTypes.nodeInfo) ast == Set.singleton ("Module", "Module")
+                then
+                  concatMap
+                    (makeLines hieFile)
+                    $ filter
+                      ( Set.null
+                          . Set.intersection
+                            (Set.fromList ["IEName", "IEThingWith", "IEThingAll", "IEModuleContents", "ImportDecl"]) -- ignore exports and imports
+                          . Set.map fst
+                          . HieTypes.nodeAnnotations
+                          . HieTypes.nodeInfo
+                      )
+                      $ HieTypes.nodeChildren ast
+                else makeLines hieFile ast
+    recursiveAstCount ast = (1 :: Int) + sum (recursiveAstCount <$> HieTypes.nodeChildren ast)
+    makeLines hieFile ast =
+      let nodeInfo = HieTypes.nodeInfo ast
+          nodeAnnotationsText =
+            Text.intercalate ", "
+              . fmap (\(c, t) -> (Text.pack . FastString.unpackFS) c <> "/" <> (Text.pack . FastString.unpackFS) t)
+              . Set.toList
+              . HieTypes.nodeAnnotations
+              $ nodeInfo
+          _termUnitIds = termUnitIdSet ast
+          _allTypeUnitIds = unitIdsForTypeIndex VisibleAndInvsibleArgs hieFile (typeIndexSetForAst ast)
+          _visibleTypeUnitIds = unitIdsForTypeIndex OnlyVisibleArgs hieFile (typeIndexSetForAst ast)
+          currentLine =
+            ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
+              (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
+              nodeAnnotationsText,
+              (Text.pack . show . recursiveAstCount) ast,
+              (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast
             )
        in [currentLine]
 
