@@ -21,6 +21,7 @@ dependencies:
 - ghc-paths
 - lens
 - mtl
+- optparse-applicative
 - pretty-simple
 - text
 

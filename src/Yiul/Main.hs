@@ -2,39 +2,81 @@
 
 module Yiul.Main where
 
-import Control.Monad (when)
+import Control.Monad (join, when)
 import qualified Data.ByteString.Lazy as ByteString.Lazy
 import Data.Generics.Labels ()
+import Options.Applicative
 import qualified System.Directory as Directory
-import qualified System.Environment as Environment
 import System.FilePath ((</>))
 import qualified Yiul.GhcPkg
 import qualified Yiul.Hie
 import qualified Yiul.Report
 
 main :: IO ()
-main = do
-  args <- Environment.getArgs
-  inputPath <-
-    case args of
-      [arg] -> pure arg
-      [] -> fail "Required argument: EITHER directory with any .hie files in subdirectories OR a file where each line is an absolute path to an .hie file"
-      _ : _ : _ -> fail "Only pass one path argument"
+main =
+  join . customExecParser (prefs showHelpOnError) $
+    info
+      (helper <*> parser)
+      ( fullDesc
+          <> header "Yiul"
+          <> progDesc "Haskell modularity tool"
+      )
+  where
+    parser :: Parser (IO ())
+    parser =
+      run
+        <$> strOption
+          ( long "project-dir"
+              <> short 'p'
+              <> metavar "DIR"
+              <> help "The directory of the Haskell project"
+          )
+        <*> optional
+          ( strOption
+              ( long "hie-files"
+                  <> short 'h'
+                  <> metavar "FILE"
+                  <> help "A path to a file that lists the .hie files to process"
+              )
+          )
+        <*> optional
+          ( strOption
+              ( long "ghc-pkg-dump"
+                  <> short 'g'
+                  <> metavar "FILE"
+                  <> help "A path to a file that contains the dump of 'ghc-pkg dump'"
+              )
+          )
+        <*> switch
+          ( long "ast-report"
+              <> short 'a'
+              <> help "Generate a detailed AST report"
+          )
 
-  when False do
-    putStrLn $ "Loading ghc-pkg dump output: " <> inputPath
-    bytes <- ByteString.Lazy.readFile inputPath
-    case Yiul.GhcPkg.parsePackages bytes of
-      Left errs -> do
-        mapM_ putStrLn errs
-        fail "See above errors parsing ghc-pkg dump output"
-      Right results -> do
-        putStrLn $ "Loaded " <> (show . length) results <> " package infos"
+run :: FilePath -> Maybe FilePath -> Maybe FilePath -> Bool -> IO ()
+run projectDir mHieFileListPath mGhcPkgDump astReportFlag = do
+  case mGhcPkgDump of
+    Nothing -> pure ()
+    Just ghcPkgDump -> do
+      putStrLn $ "Loading ghc-pkg dump output: " <> ghcPkgDump
+      bytes <- ByteString.Lazy.readFile ghcPkgDump
+      case Yiul.GhcPkg.parsePackages bytes of
+        Left errs -> do
+          mapM_ putStrLn errs
+          fail "See above errors parsing ghc-pkg dump output"
+        Right results -> do
+          putStrLn $ "Loaded " <> (show . length) results <> " package infos"
 
-  hieFilePaths <- Yiul.Hie.handleInputPath inputPath
+  hieFilePaths <-
+    case mHieFileListPath of
+      Nothing ->
+        do
+          putStrLn $ "Recursively finding files in " <> projectDir
+          Yiul.Hie.findHieFiles projectDir
+      Just hieFileListPath -> Yiul.Hie.loadHieFileList projectDir hieFileListPath
   putStrLn $ ".hie files found: " <> (show . length) hieFilePaths
 
-  hieFileResults <- Yiul.Hie.topLevelLoadHieFiles hieFilePaths
+  hieFileResults <- Yiul.Hie.topLevelLoadHieFiles projectDir hieFilePaths
 
   let reportsDir = "reports"
   Directory.createDirectoryIfMissing True reportsDir
@@ -43,5 +85,6 @@ main = do
 
   Yiul.Report.writeReport (reportsDir </> "stats-report.tsv") Yiul.Report.makeStatsReport hieFileResults
 
-  Yiul.Report.processASTs hieFileResults
-  Yiul.Report.writeReport (reportsDir </> "ast-report.tsv") Yiul.Report.makeAstStatsReport hieFileResults
+  when astReportFlag do
+    Yiul.Report.processASTs hieFileResults
+    Yiul.Report.writeReport (reportsDir </> "ast-report.tsv") Yiul.Report.makeAstStatsReport hieFileResults
