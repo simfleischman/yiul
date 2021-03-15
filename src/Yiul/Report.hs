@@ -25,9 +25,10 @@ import qualified Module
 import qualified Name
 import qualified SrcLoc
 import qualified UniqSet
+import Yiul.Const
 import Prelude hiding (span)
 
-makeVersionReport :: [(FilePath, HieFileResult)] -> Text
+makeVersionReport :: [(HieFilePath, HieFileResult)] -> Text
 makeVersionReport = Text.unlines . (headerLine :) . fmap makeLine
   where
     headerLine =
@@ -42,13 +43,13 @@ makeVersionReport = Text.unlines . (headerLine :) . fmap makeLine
       let hieFile = HieBin.hie_file_result hieFileResult
        in Text.intercalate
             "\t"
-            [ Text.pack filePath,
+            [ (Text.pack . unConst) filePath,
               (Text.pack . HieTypes.hie_hs_file) hieFile,
               (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
               (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
             ]
 
-makeStatsReport :: [(FilePath, HieFileResult)] -> Text
+makeStatsReport :: [(HieFilePath, HieFileResult)] -> Text
 makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
   where
     headerLine =
@@ -69,7 +70,7 @@ makeStatsReport = Text.unlines . (headerLine :) . fmap makeLine
           hieModule = HieTypes.hie_module hieFile
        in Text.intercalate
             "\t"
-            [ Text.pack filePath,
+            [ (Text.pack . unConst) filePath,
               (Text.pack . HieTypes.hie_hs_file) hieFile,
               getFirstAstFile hieFile,
               (makeUnitIdText . Module.moduleUnitId) hieModule,
@@ -102,13 +103,13 @@ makeUnitIdText :: Module.UnitId -> Text
 makeUnitIdText (Module.IndefiniteUnitId _) = "IndefiniteUnitId"
 makeUnitIdText (Module.DefiniteUnitId defUnitId) = (Text.pack . FastString.unpackFS . Module.installedUnitIdFS . Module.unDefUnitId) defUnitId
 
-writeReport :: FilePath -> ([(FilePath, HieFileResult)] -> Text) -> [(FilePath, HieFileResult)] -> IO ()
+writeReport :: ReportsPath -> ([(HieFilePath, HieFileResult)] -> Text) -> [(HieFilePath, HieFileResult)] -> IO ()
 writeReport reportPath makeReport hieFileResults = do
-  putStrLn $ "Writing " <> reportPath
-  ByteString.writeFile reportPath $ Text.Encoding.encodeUtf8 $ makeReport hieFileResults
+  putStrLn $ "Writing " <> unConst reportPath
+  ByteString.writeFile (unConst reportPath) $ Text.Encoding.encodeUtf8 $ makeReport hieFileResults
 
 -- | Index by HIE version (Integer) and GHC version (ByteString)
-makeVersionMap :: [(FilePath, HieFileResult)] -> Map (Integer, ByteString) [(FilePath, HieFileResult)]
+makeVersionMap :: [(HieFilePath, HieFileResult)] -> Map (Integer, ByteString) [(HieFilePath, HieFileResult)]
 makeVersionMap = Map.unionsWith (<>) . fmap go
   where
     go pair@(_, hieFileResult) =
@@ -116,7 +117,7 @@ makeVersionMap = Map.unionsWith (<>) . fmap go
         (HieBin.hie_file_result_version hieFileResult, HieBin.hie_file_result_ghc_version hieFileResult)
         [pair]
 
-checkHieVersions :: [(FilePath, HieFileResult)] -> IO ()
+checkHieVersions :: [(HieFilePath, HieFileResult)] -> IO ()
 checkHieVersions hieFileResults = do
   let versionMap = makeVersionMap hieFileResults
       versionMapKeys = Map.keys versionMap
@@ -129,7 +130,7 @@ checkHieVersions hieFileResults = do
       putStrLn "Multiple versions of HIE/GHC found. See version report for details."
       mapM_ (\(hieVersion, ghcVersion) -> putStrLn $ show hieVersion <> " / " <> (Text.unpack . Text.Encoding.decodeUtf8) ghcVersion) versionMapKeys
 
-processASTs :: [(FilePath, HieFileResult)] -> IO ()
+processASTs :: [(HieFilePath, HieFileResult)] -> IO ()
 processASTs hieFileResults = do
   let astFilePathSet = foldr buildAstFilePathSet Set.empty hieFileResults
   putStrLn $ "AST key count: " <> (show . Set.size) astFilePathSet
@@ -165,7 +166,7 @@ processASTs hieFileResults = do
       let maps = Map.singleton (HieTypes.nodeAnnotations nodeInfo) (1 :: Int)
        in Map.unionsWith (+) [inputMap, maps]
 
-makeAstStatsReport :: [(FilePath, HieFileResult)] -> Text
+makeAstStatsReport :: [(HieFilePath, HieFileResult)] -> Text
 makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
   where
     headerLine =
@@ -215,7 +216,7 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
           nextLines = concatMap (makeAstLines filePath) (HieTypes.nodeChildren ast)
        in currentLine : nextLines
 
-makeTopLevelBindingReport :: [(FilePath, HieFileResult)] -> Text
+makeTopLevelBindingReport :: [(HieFilePath, HieFileResult)] -> Text
 makeTopLevelBindingReport = Text.unlines . (headerLine :) . concatMap handlePair
   where
     headerLine =

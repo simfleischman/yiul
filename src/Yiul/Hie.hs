@@ -1,5 +1,6 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Yiul.Hie where
 
@@ -12,11 +13,11 @@ import qualified HieBin
 import NameCache (NameCache)
 import qualified NameCache
 import qualified System.Directory.Recursive as Directory.Recursive
-import System.FilePath ((</>))
 import qualified System.FilePath as FilePath
 import qualified UniqSupply
+import Yiul.Const
 
-topLevelLoadHieFiles :: FilePath -> [FilePath] -> IO [(FilePath, HieFileResult)]
+topLevelLoadHieFiles :: ProjectDir -> [HieFilePath] -> IO [(HieFilePath, HieFileResult)]
 topLevelLoadHieFiles projectDir hieFilePaths = do
   putStrLn "Loading .hie files"
   uniqSupply <- UniqSupply.mkSplitUniqSupply 'Q'
@@ -25,30 +26,31 @@ topLevelLoadHieFiles projectDir hieFilePaths = do
   putStrLn $ ".hie files loaded: " <> (show . length) hieFileResults
   pure hieFileResults
 
-loadHieFiles :: NameCache -> FilePath -> [FilePath] -> IO (NameCache, [(FilePath, HieFileResult)])
+loadHieFiles :: NameCache -> ProjectDir -> [HieFilePath] -> IO (NameCache, [(HieFilePath, HieFileResult)])
 loadHieFiles initialNameCache projectDir = foldrM go (initialNameCache, [])
   where
     go filePath (inputNameCache, hieFileResults) =
       do
-        (hieFileResult, outputNameCache) <- HieBin.readHieFile inputNameCache (projectDir </> filePath)
+        (hieFileResult, outputNameCache) <- HieBin.readHieFile inputNameCache (unConst (projectDir </> filePath))
         return (outputNameCache, (filePath, hieFileResult) : hieFileResults)
 
-findHieFiles :: FilePath -> IO [FilePath]
+findHieFiles :: ProjectDir -> IO [HieFilePath]
 findHieFiles dir = do
-  allFiles <- Directory.Recursive.getFilesRecursive dir
-  pure $
-    FilePath.makeRelative dir
-      <$> filter (\path -> FilePath.takeExtension path == ".hie") allFiles
+  allFiles <-
+    fmap (mkConst @HieFilePath)
+      <$> Directory.Recursive.getFilesRecursive (unConst dir)
+  let filteredFiles = filter (\path -> FilePath.takeExtension (unConst path) == ".hie") allFiles
+  pure $ fmap (makeRelativeFilePath dir) filteredFiles
 
-loadHieFileList :: FilePath -> FilePath -> IO [FilePath]
+loadHieFileList :: ProjectDir -> HieFileListPath -> IO [HieFilePath]
 loadHieFileList projectDir path = do
-  bytes <- ByteString.readFile path
+  bytes <- ByteString.readFile (unConst path)
   let text = Text.Encoding.decodeUtf8 bytes
       tryMakeRelative file =
-        if FilePath.isAbsolute file
-          then FilePath.makeRelative projectDir file
+        if FilePath.isAbsolute (unConst file)
+          then makeRelativeFilePath projectDir file
           else file
   pure $
-    fmap (tryMakeRelative . Text.unpack) $
+    fmap (tryMakeRelative . mkConst . Text.unpack) $
       filter (not . Text.null) $
         Text.lines text
