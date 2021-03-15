@@ -12,6 +12,7 @@ import Data.Generics.Labels ()
 import qualified Data.List as List
 import Data.Map (Map)
 import qualified Data.Map as Map
+import qualified Data.Maybe as Maybe
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -224,7 +225,9 @@ makeTopLevelBindingReport = Text.unlines . (headerLine :) . concatMap handlePair
           "End",
           "Node Annotations",
           "Descendants",
-          "Lines"
+          "Lines",
+          "UnitId Count",
+          "UnitIds"
         ]
     handlePair (filePath, hieFileResult) =
       case (getMaybeAst . HieBin.hie_file_result) hieFileResult of
@@ -245,6 +248,15 @@ makeTopLevelBindingReport = Text.unlines . (headerLine :) . concatMap handlePair
                   $ HieTypes.nodeChildren ast
             else makeLines filePath ast
     recursiveAstCount ast = (1 :: Int) + sum (recursiveAstCount <$> HieTypes.nodeChildren ast)
+    identifierToUnitIdSet (Left _moduleName) = Set.empty
+    identifierToUnitIdSet (Right name) = Set.fromList $ fmap Module.moduleUnitId $ Maybe.maybeToList $ Name.nameModule_maybe name
+    unitIdsInAst ast =
+      Set.unions
+        ( fmap
+            identifierToUnitIdSet
+            (Map.keys . HieTypes.nodeIdentifiers . HieTypes.nodeInfo $ ast)
+        )
+        <> Set.unions (fmap unitIdsInAst (HieTypes.nodeChildren ast))
     makeLines _filePath ast =
       let nodeInfo = HieTypes.nodeInfo ast
           nodeAnnotationsText =
@@ -253,6 +265,7 @@ makeTopLevelBindingReport = Text.unlines . (headerLine :) . concatMap handlePair
               . Set.toList
               . HieTypes.nodeAnnotations
               $ nodeInfo
+          unitIds = unitIdsInAst ast
           currentLine =
             Text.intercalate
               "\t"
@@ -260,7 +273,9 @@ makeTopLevelBindingReport = Text.unlines . (headerLine :) . concatMap handlePair
                 (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
                 nodeAnnotationsText,
                 (Text.pack . show . recursiveAstCount) ast,
-                (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast
+                (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast,
+                (Text.pack . show . Set.size) unitIds,
+                (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) unitIds
               ]
        in [currentLine]
 
