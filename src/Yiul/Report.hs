@@ -1,12 +1,18 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Yiul.Report where
 
 import qualified Avail
 import qualified Control.Lens as Lens
 import Control.Monad (when)
+import Data.Array ((!))
 import qualified Data.Array as Array
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
@@ -15,6 +21,7 @@ import qualified Data.List as List
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
+import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -23,6 +30,7 @@ import qualified FastString
 import HieBin (HieFileResult)
 import qualified HieBin
 import qualified HieTypes
+import qualified IfaceType
 import qualified Module
 import qualified Name
 import qualified SrcLoc
@@ -218,38 +226,81 @@ makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
         "Node Annotations",
         "Descendants",
         "Lines",
-        "UnitId Count",
-        "UnitIds"
+        "Term UnitId Count",
+        "Term UnitIds",
+        "Type UnitId Count",
+        "Type UnitIds",
+        "Combined UnitId Count"
       )
-    handlePair (filePath, hieFileResult) =
-      case (getMaybeAst . HieBin.hie_file_result) hieFileResult of
-        Nothing -> []
-        Just ast ->
-          if (HieTypes.nodeAnnotations . HieTypes.nodeInfo) ast == Set.singleton ("Module", "Module")
-            then
-              concatMap
-                (makeLines filePath)
-                $ filter
-                  ( Set.null
-                      . Set.intersection
-                        (Set.fromList ["IEName", "IEThingWith", "IEThingAll", "IEModuleContents", "ImportDecl"]) -- ignore exports and imports
-                      . Set.map fst
-                      . HieTypes.nodeAnnotations
-                      . HieTypes.nodeInfo
-                  )
-                  $ HieTypes.nodeChildren ast
-            else makeLines filePath ast
+    handlePair (_filePath, hieFileResult) =
+      let hieFile = HieBin.hie_file_result hieFileResult
+       in case getMaybeAst hieFile of
+            Nothing -> []
+            Just ast ->
+              if (HieTypes.nodeAnnotations . HieTypes.nodeInfo) ast == Set.singleton ("Module", "Module")
+                then
+                  concatMap
+                    (makeLines hieFile)
+                    $ filter
+                      ( Set.null
+                          . Set.intersection
+                            (Set.fromList ["IEName", "IEThingWith", "IEThingAll", "IEModuleContents", "ImportDecl"]) -- ignore exports and imports
+                          . Set.map fst
+                          . HieTypes.nodeAnnotations
+                          . HieTypes.nodeInfo
+                      )
+                      $ HieTypes.nodeChildren ast
+                else makeLines hieFile ast
     recursiveAstCount ast = (1 :: Int) + sum (recursiveAstCount <$> HieTypes.nodeChildren ast)
     identifierToUnitIdSet (Left _moduleName) = Set.empty
-    identifierToUnitIdSet (Right name) = Set.fromList $ fmap Module.moduleUnitId $ Maybe.maybeToList $ Name.nameModule_maybe name
-    unitIdsInAst ast =
-      Set.unions
+    identifierToUnitIdSet (Right name) = nameToUnitIdSet name
+    nameToUnitIdSet :: Name.Name -> Set Module.UnitId
+    nameToUnitIdSet = Set.fromList . fmap Module.moduleUnitId . Maybe.maybeToList . Name.nameModule_maybe
+    typeIndexSetForAst :: HieTypes.HieAST HieTypes.TypeIndex -> Set HieTypes.TypeIndex
+    typeIndexSetForAst ast =
+      let nodeInfo = HieTypes.nodeInfo ast
+          nodeTypeIndexSet = Set.fromList . HieTypes.nodeType $ nodeInfo
+          identifierDetails :: Set HieTypes.TypeIndex
+          identifierDetails = Set.fromList . Maybe.mapMaybe HieTypes.identType . Map.elems . HieTypes.nodeIdentifiers $ nodeInfo
+          nodeChildren = HieTypes.nodeChildren ast
+          childrenSets = typeIndexSetForAst <$> nodeChildren
+       in nodeTypeIndexSet <> identifierDetails <> Set.unions childrenSets
+    hieArgsToIndexSet :: HieTypes.HieArgs HieTypes.TypeIndex -> Set HieTypes.TypeIndex
+    hieArgsToIndexSet (HieTypes.HieArgs pairs) = Set.fromList (snd <$> pairs) -- FIXME? only return visible args here? (where fst == True)
+    unitIdPairsForHieType :: HieTypes.HieType HieTypes.TypeIndex -> (Set Module.UnitId, Set HieTypes.TypeIndex)
+    unitIdPairsForHieType (HieTypes.HTyVarTy name) = (nameToUnitIdSet name, Set.empty)
+    unitIdPairsForHieType (HieTypes.HAppTy index1 args) = (Set.empty, Set.insert index1 (hieArgsToIndexSet args))
+    unitIdPairsForHieType (HieTypes.HTyConApp ifaceTyCon args) = ((nameToUnitIdSet . IfaceType.ifaceTyConName) ifaceTyCon, hieArgsToIndexSet args)
+    unitIdPairsForHieType (HieTypes.HForAllTy ((name, index1), _argFlag) index2) = (nameToUnitIdSet name, Set.fromList [index1, index2])
+    unitIdPairsForHieType (HieTypes.HFunTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
+    unitIdPairsForHieType (HieTypes.HQualTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
+    unitIdPairsForHieType (HieTypes.HLitTy _ifaceTyLit) = (Set.empty, Set.empty)
+    unitIdPairsForHieType (HieTypes.HCastTy index) = (Set.empty, Set.singleton index)
+    unitIdPairsForHieType HieTypes.HCoercionTy = (Set.empty, Set.empty)
+    unitIdsForTypeIndex :: HieTypes.HieFile -> Set HieTypes.TypeIndex -> Set Module.UnitId
+    unitIdsForTypeIndex hieFile typeIndexSet = go Set.empty typeIndexSet Set.empty
+      where
+        go visited toVisit resultSet =
+          if Set.null toVisit
+            then resultSet
+            else
+              let (currentSet, moreToVisit) = Set.splitAt 1 toVisit
+                  currentIndex = Set.elemAt 0 currentSet
+               in if Set.member currentIndex visited
+                    then go visited moreToVisit resultSet
+                    else
+                      let typ = HieTypes.hie_types hieFile ! currentIndex
+                          (currentResults, extraToVisit) = unitIdPairsForHieType typ
+                          extraToVisitMinusCurrent = Set.delete currentIndex extraToVisit
+                       in go (Set.insert currentIndex visited) (Set.union moreToVisit extraToVisitMinusCurrent) (Set.union currentResults resultSet)
+    termUnitIdSet ast =
+      mconcat
         ( fmap
             identifierToUnitIdSet
             (Map.keys . HieTypes.nodeIdentifiers . HieTypes.nodeInfo $ ast)
         )
-        <> Set.unions (fmap unitIdsInAst (HieTypes.nodeChildren ast))
-    makeLines _filePath ast =
+        <> mconcat (fmap termUnitIdSet (HieTypes.nodeChildren ast))
+    makeLines hieFile ast =
       let nodeInfo = HieTypes.nodeInfo ast
           nodeAnnotationsText =
             Text.intercalate ", "
@@ -257,15 +308,19 @@ makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
               . Set.toList
               . HieTypes.nodeAnnotations
               $ nodeInfo
-          unitIds = unitIdsInAst ast
+          termUnitIds = termUnitIdSet ast
+          typeUnitIds = unitIdsForTypeIndex hieFile (typeIndexSetForAst ast)
           currentLine =
             ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
               (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
               nodeAnnotationsText,
               (Text.pack . show . recursiveAstCount) ast,
               (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast,
-              (Text.pack . show . Set.size) unitIds,
-              (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) unitIds
+              (Text.pack . show . Set.size) termUnitIds,
+              (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) termUnitIds,
+              (Text.pack . show . Set.size) typeUnitIds,
+              (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) typeUnitIds,
+              (Text.pack . show . Set.size) (Set.union termUnitIds typeUnitIds)
             )
        in [currentLine]
 
@@ -311,3 +366,7 @@ srcLocToText (SrcLoc.RealSrcLoc loc) =
     <> ":"
     <> (Text.pack . show . SrcLoc.srcLocCol) loc
 srcLocToText (SrcLoc.UnhelpfulLoc fastString) = "UnhelpfulLoc:" <> (Text.pack . FastString.unpackFS) fastString
+
+instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10) a b where
+  each f ~(a, b, c, d, e, g, h, i, j, k) = (,,,,,,,,,) <$> f a <*> f b <*> f c <*> f d <*> f e <*> f g <*> f h <*> f i <*> f j <*> f k
+  {-# INLINE each #-}
