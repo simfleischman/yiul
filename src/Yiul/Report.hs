@@ -228,9 +228,12 @@ makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
         "Lines",
         "Term UnitId Count",
         "Term UnitIds",
-        "Type UnitId Count",
-        "Type UnitIds",
-        "Combined UnitId Count"
+        "Type All UnitId Count",
+        "Type All UnitIds",
+        "Type Visible UnitId Count",
+        "Type Visible UnitIds",
+        "Combined All UnitId Count",
+        "Combined Visible UnitId Count"
       )
     handlePair (_filePath, hieFileResult) =
       let hieFile = HieBin.hie_file_result hieFileResult
@@ -261,7 +264,8 @@ makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
               . HieTypes.nodeAnnotations
               $ nodeInfo
           termUnitIds = termUnitIdSet ast
-          typeUnitIds = unitIdsForTypeIndex hieFile (typeIndexSetForAst ast)
+          allTypeUnitIds = unitIdsForTypeIndex VisibleAndInvsibleArgs hieFile (typeIndexSetForAst ast)
+          visibleTypeUnitIds = unitIdsForTypeIndex OnlyVisibleArgs hieFile (typeIndexSetForAst ast)
           currentLine =
             ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
               (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
@@ -270,9 +274,12 @@ makeTopLevelBindingReport = makeTsv . (headerLine :) . concatMap handlePair
               (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast,
               (Text.pack . show . Set.size) termUnitIds,
               (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) termUnitIds,
-              (Text.pack . show . Set.size) typeUnitIds,
-              (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) typeUnitIds,
-              (Text.pack . show . Set.size) (Set.union termUnitIds typeUnitIds)
+              (Text.pack . show . Set.size) allTypeUnitIds,
+              (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) allTypeUnitIds,
+              (Text.pack . show . Set.size) visibleTypeUnitIds,
+              (Text.intercalate ", " . fmap makeUnitIdText . Set.toList) visibleTypeUnitIds,
+              (Text.pack . show . Set.size) (Set.union termUnitIds allTypeUnitIds),
+              (Text.pack . show . Set.size) (Set.union termUnitIds visibleTypeUnitIds)
             )
        in [currentLine]
 
@@ -287,24 +294,27 @@ typeIndexSetForAst ast =
       identifierDetails = Set.fromList . Maybe.mapMaybe HieTypes.identType . Map.elems . HieTypes.nodeIdentifiers $ nodeInfo
       nodeChildren = HieTypes.nodeChildren ast
       childrenSets = typeIndexSetForAst <$> nodeChildren
-    in nodeTypeIndexSet <> identifierDetails <> Set.unions childrenSets
+   in nodeTypeIndexSet <> identifierDetails <> Set.unions childrenSets
 
-hieArgsToIndexSet :: HieTypes.HieArgs HieTypes.TypeIndex -> Set HieTypes.TypeIndex
-hieArgsToIndexSet (HieTypes.HieArgs pairs) = Set.fromList (snd <$> pairs) -- FIXME? only return visible args here? (where fst == True)
+data VisibleArgs = VisibleAndInvsibleArgs | OnlyVisibleArgs
 
-unitIdPairsForHieType :: HieTypes.HieType HieTypes.TypeIndex -> (Set Module.UnitId, Set HieTypes.TypeIndex)
-unitIdPairsForHieType (HieTypes.HTyVarTy name) = (nameToUnitIdSet name, Set.empty)
-unitIdPairsForHieType (HieTypes.HAppTy index1 args) = (Set.empty, Set.insert index1 (hieArgsToIndexSet args))
-unitIdPairsForHieType (HieTypes.HTyConApp ifaceTyCon args) = ((nameToUnitIdSet . IfaceType.ifaceTyConName) ifaceTyCon, hieArgsToIndexSet args)
-unitIdPairsForHieType (HieTypes.HForAllTy ((name, index1), _argFlag) index2) = (nameToUnitIdSet name, Set.fromList [index1, index2])
-unitIdPairsForHieType (HieTypes.HFunTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
-unitIdPairsForHieType (HieTypes.HQualTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
-unitIdPairsForHieType (HieTypes.HLitTy _ifaceTyLit) = (Set.empty, Set.empty)
-unitIdPairsForHieType (HieTypes.HCastTy index) = (Set.empty, Set.singleton index)
-unitIdPairsForHieType HieTypes.HCoercionTy = (Set.empty, Set.empty)
+hieArgsToIndexSet :: VisibleArgs -> HieTypes.HieArgs HieTypes.TypeIndex -> Set HieTypes.TypeIndex
+hieArgsToIndexSet VisibleAndInvsibleArgs (HieTypes.HieArgs pairs) = Set.fromList (snd <$> pairs)
+hieArgsToIndexSet OnlyVisibleArgs (HieTypes.HieArgs pairs) = Set.fromList (snd <$> filter fst pairs)
 
-unitIdsForTypeIndex :: HieTypes.HieFile -> Set HieTypes.TypeIndex -> Set Module.UnitId
-unitIdsForTypeIndex hieFile typeIndexSet = go Set.empty typeIndexSet Set.empty
+unitIdPairsForHieType :: VisibleArgs -> HieTypes.HieType HieTypes.TypeIndex -> (Set Module.UnitId, Set HieTypes.TypeIndex)
+unitIdPairsForHieType _visibleArgs (HieTypes.HTyVarTy name) = (nameToUnitIdSet name, Set.empty)
+unitIdPairsForHieType visibleArgs (HieTypes.HAppTy index1 args) = (Set.empty, Set.insert index1 (hieArgsToIndexSet visibleArgs args))
+unitIdPairsForHieType visibleArgs (HieTypes.HTyConApp ifaceTyCon args) = ((nameToUnitIdSet . IfaceType.ifaceTyConName) ifaceTyCon, hieArgsToIndexSet visibleArgs args)
+unitIdPairsForHieType _visibleArgs (HieTypes.HForAllTy ((name, index1), _argFlag) index2) = (nameToUnitIdSet name, Set.fromList [index1, index2])
+unitIdPairsForHieType _visibleArgs (HieTypes.HFunTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
+unitIdPairsForHieType _visibleArgs (HieTypes.HQualTy index1 index2) = (Set.empty, Set.fromList [index1, index2])
+unitIdPairsForHieType _visibleArgs (HieTypes.HLitTy _ifaceTyLit) = (Set.empty, Set.empty)
+unitIdPairsForHieType _visibleArgs (HieTypes.HCastTy index) = (Set.empty, Set.singleton index)
+unitIdPairsForHieType _visibleArgs HieTypes.HCoercionTy = (Set.empty, Set.empty)
+
+unitIdsForTypeIndex :: VisibleArgs -> HieTypes.HieFile -> Set HieTypes.TypeIndex -> Set Module.UnitId
+unitIdsForTypeIndex includeVisibleArgs hieFile typeIndexSet = go Set.empty typeIndexSet Set.empty
   where
     go visited toVisit resultSet =
       if Set.null toVisit
@@ -312,13 +322,13 @@ unitIdsForTypeIndex hieFile typeIndexSet = go Set.empty typeIndexSet Set.empty
         else
           let (currentSet, moreToVisit) = Set.splitAt 1 toVisit
               currentIndex = Set.elemAt 0 currentSet
-            in if Set.member currentIndex visited
+           in if Set.member currentIndex visited
                 then go visited moreToVisit resultSet
                 else
                   let typ = HieTypes.hie_types hieFile ! currentIndex
-                      (currentResults, extraToVisit) = unitIdPairsForHieType typ
+                      (currentResults, extraToVisit) = unitIdPairsForHieType includeVisibleArgs typ
                       extraToVisitMinusCurrent = Set.delete currentIndex extraToVisit
-                    in go (Set.insert currentIndex visited) (Set.union moreToVisit extraToVisitMinusCurrent) (Set.union currentResults resultSet)
+                   in go (Set.insert currentIndex visited) (Set.union moreToVisit extraToVisitMinusCurrent) (Set.union currentResults resultSet)
 
 termUnitIdSet :: HieTypes.HieAST a -> Set Module.UnitId
 termUnitIdSet ast =
@@ -378,4 +388,16 @@ srcLocToText (SrcLoc.UnhelpfulLoc fastString) = "UnhelpfulLoc:" <> (Text.pack . 
 
 instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10) a b where
   each f ~(a, b, c, d, e, g, h, i, j, k) = (,,,,,,,,,) <$> f a <*> f b <*> f c <*> f d <*> f e <*> f g <*> f h <*> f i <*> f j <*> f k
+  {-# INLINE each #-}
+
+instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, a ~ a11, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10, b ~ b11) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11) a b where
+  each f ~(a, b, c, d, e, g, h, i, j, k, l) = (,,,,,,,,,,) <$> f a <*> f b <*> f c <*> f d <*> f e <*> f g <*> f h <*> f i <*> f j <*> f k <*> f l
+  {-# INLINE each #-}
+
+instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, a ~ a11, a ~ a12, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10, b ~ b11, b ~ b12) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12) a b where
+  each f ~(a, b, c, d, e, g, h, i, j, k, l, m) = (,,,,,,,,,,,) <$> f a <*> f b <*> f c <*> f d <*> f e <*> f g <*> f h <*> f i <*> f j <*> f k <*> f l <*> f m
+  {-# INLINE each #-}
+
+instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, a ~ a11, a ~ a12, a ~ a13, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10, b ~ b11, b ~ b12, b ~ b13) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13) a b where
+  each f ~(a, b, c, d, e, g, h, i, j, k, l, m, n) = (,,,,,,,,,,,,) <$> f a <*> f b <*> f c <*> f d <*> f e <*> f g <*> f h <*> f i <*> f j <*> f k <*> f l <*> f m <*> f n
   {-# INLINE each #-}
