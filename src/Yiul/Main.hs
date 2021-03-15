@@ -1,11 +1,35 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Yiul.Main where
 
+import Control.Applicative (Const (getConst))
 import Control.Monad (join, when)
 import qualified Data.ByteString.Lazy as ByteString.Lazy
 import Data.Generics.Labels ()
+import GHC.TypeLits (Symbol)
 import Options.Applicative
+  ( Const (Const),
+    Parser,
+    customExecParser,
+    fullDesc,
+    header,
+    help,
+    helper,
+    info,
+    long,
+    metavar,
+    optional,
+    prefs,
+    progDesc,
+    short,
+    showHelpOnError,
+    strOption,
+    switch,
+  )
 import qualified System.Directory as Directory
 import System.FilePath ((</>))
 import qualified Yiul.GhcPkg
@@ -47,13 +71,27 @@ main =
                   <> help "A path to a file that contains the dump of 'ghc-pkg dump'"
               )
           )
-        <*> switch
-          ( long "ast-report"
-              <> short 'a'
-              <> help "Generate a detailed AST report"
+        <*> fmap
+          (mkConst @AstReportFlag)
+          ( switch
+              ( long "ast-report"
+                  <> short 'a'
+                  <> help "Generate a detailed AST report"
+              )
           )
 
-run :: FilePath -> Maybe FilePath -> Maybe FilePath -> Bool -> IO ()
+type AstReportFlag = Const Bool "AstReportFlag"
+
+mkConst :: forall t (s :: Symbol) a. (t ~ Const a s) => a -> t
+mkConst = Const
+
+unConst :: forall a (s :: Symbol). Const a s -> a
+unConst = getConst
+
+whenConst :: forall (s :: Symbol) m. Applicative m => Const Bool s -> m () -> m ()
+whenConst flag = when (unConst flag)
+
+run :: FilePath -> Maybe FilePath -> Maybe FilePath -> AstReportFlag -> IO ()
 run projectDir mHieFileListPath mGhcPkgDump astReportFlag = do
   case mGhcPkgDump of
     Nothing -> pure ()
@@ -87,6 +125,6 @@ run projectDir mHieFileListPath mGhcPkgDump astReportFlag = do
 
   Yiul.Report.writeReport (reportsDir </> "top-level-binding-report.tsv") Yiul.Report.makeTopLevelBindingReport hieFileResults
 
-  when astReportFlag do
+  whenConst astReportFlag do
     Yiul.Report.processASTs hieFileResults
     Yiul.Report.writeReport (reportsDir </> "ast-report.tsv") Yiul.Report.makeAstStatsReport hieFileResults
