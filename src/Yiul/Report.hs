@@ -171,6 +171,7 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
       Text.intercalate
         "\t"
         [ "Span",
+          "End",
           "Node Annotations",
           "Node Children Count",
           "Node Type Count",
@@ -202,7 +203,8 @@ makeAstStatsReport = Text.unlines . (headerLine :) . concatMap handlePair
           currentLine =
             Text.intercalate
               "\t"
-              [ (Text.pack . show . HieTypes.nodeSpan) ast,
+              [ (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
+                (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
                 nodeAnnotationsText,
                 (Text.pack . show . length . HieTypes.nodeChildren) ast,
                 (Text.pack . show . length . HieTypes.nodeType . HieTypes.nodeInfo) ast,
