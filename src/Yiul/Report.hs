@@ -61,7 +61,6 @@ makeStatsReport = makeTsv . (headerLine :) . fmap makeLine
     headerLine =
       ( "HIE File",
         "Haskell Source File",
-        "AST filepath",
         "Module UnitId",
         "Module Name",
         "Types used",
@@ -74,7 +73,6 @@ makeStatsReport = makeTsv . (headerLine :) . fmap makeLine
           hieModule = HieTypes.hie_module hieFile
        in ( (Text.pack . unConst) filePath,
             (Text.pack . HieTypes.hie_hs_file) hieFile,
-            getFirstAstFile hieFile,
             (makeUnitIdText . Module.moduleUnitId) hieModule,
             (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
             (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile,
