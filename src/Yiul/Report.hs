@@ -502,6 +502,22 @@ srcLocToText (SrcLoc.RealSrcLoc loc) =
     <> (Text.pack . show . SrcLoc.srcLocCol) loc
 srcLocToText (SrcLoc.UnhelpfulLoc fastString) = "UnhelpfulLoc:" <> (Text.pack . FastString.unpackFS) fastString
 
+data Package
+  = PackageUnitId Module.UnitId
+  | PackageExe FilePath -- HIE files don't have unambiguous names for exes (and tests) so we approximate by the folder of the hie file (only works if hie files are in the build output dirs; if all hie files are in the same dir, then this approach won't work)
+  deriving (Show)
+
+organizeByPackages :: [(HieFilePath, HieFileResult)] -> IO (Map Package [(HieFilePath, HieFileResult)])
+organizeByPackages inputPairs = do
+  let isExeMain (_hieFilePath, hieFileResult) =
+        let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
+            unitId = Module.moduleUnitId hieModule
+            moduleName = Module.moduleNameString . Module.moduleName $ hieModule
+        in unitId == Module.mainUnitId && moduleName == "Main"
+  let (exeMains, _others) = List.partition isExeMain inputPairs
+  mapM_ (putStrLn . removeDotDirectories . unConst . fst) exeMains
+  pure Map.empty
+
 instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10) a b where
   each f ~(a, b, c, d, e, g, h, i, j, k) = (,,,,,,,,,) <$> f a <*> f b <*> f c <*> f d <*> f e <*> f g <*> f h <*> f i <*> f j <*> f k
   {-# INLINE each #-}

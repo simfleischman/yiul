@@ -85,41 +85,45 @@ run
   ghcPkgDump
   astReportFlag
   topLevelBindingPackageReportFlag
-  topLevelBindingModuleReportFlag = do
-    putStrLn $ "Loading ghc-pkg dump output: " <> unConst ghcPkgDump
-    bytes <- ByteString.Lazy.readFile (unConst ghcPkgDump)
-    case Yiul.GhcPkg.parsePackages bytes of
-      Left errs -> do
-        mapM_ putStrLn errs
-        fail "See above errors parsing ghc-pkg dump output"
-      Right results -> do
-        putStrLn $ "Loaded " <> (show . length) results <> " package infos"
+  topLevelBindingModuleReportFlag =
+    do
+      putStrLn $ "Loading ghc-pkg dump output: " <> unConst ghcPkgDump
+      bytes <- ByteString.Lazy.readFile (unConst ghcPkgDump)
+      case Yiul.GhcPkg.parsePackages bytes of
+        Left errs -> do
+          mapM_ putStrLn errs
+          fail "See above errors parsing ghc-pkg dump output"
+        Right results -> do
+          putStrLn $ "Loaded " <> (show . length) results <> " package infos"
 
-    hieFilePaths <-
-      case mHieFileListPath of
-        Nothing ->
-          do
-            putStrLn $ "Recursively finding files in " <> unConst projectDir
-            Yiul.Hie.findHieFiles projectDir
-        Just hieFileListPath -> Yiul.Hie.loadHieFileList projectDir hieFileListPath
-    putStrLn $ ".hie files found: " <> (show . length) hieFilePaths
+      hieFilePaths <-
+        case mHieFileListPath of
+          Nothing ->
+            do
+              putStrLn $ "Recursively finding files in " <> unConst projectDir
+              Yiul.Hie.findHieFiles projectDir
+          Just hieFileListPath -> Yiul.Hie.loadHieFileList projectDir hieFileListPath
+      putStrLn $ ".hie files found: " <> (show . length) hieFilePaths
 
-    hieFileResults <- Yiul.Hie.topLevelLoadHieFiles projectDir hieFilePaths
+      hieFileResults <- Yiul.Hie.topLevelLoadHieFiles projectDir hieFilePaths
 
-    let reportsDir :: ReportsPath
-        reportsDir = "reports"
-    Directory.createDirectoryIfMissing True (unConst reportsDir)
-    Yiul.Report.writeReport (reportsDir </> "version-report.tsv") Yiul.Report.makeVersionReport hieFileResults
-    Yiul.Report.checkHieVersions hieFileResults
+      let reportsDir :: ReportsPath
+          reportsDir = "reports"
+      Directory.createDirectoryIfMissing True (unConst reportsDir)
+      Yiul.Report.writeReport (reportsDir </> "version-report.tsv") Yiul.Report.makeVersionReport hieFileResults
+      Yiul.Report.checkHieVersions hieFileResults
 
-    Yiul.Report.writeReport (reportsDir </> "stats-report.tsv") Yiul.Report.makeStatsReport hieFileResults
+      Yiul.Report.writeReport (reportsDir </> "stats-report.tsv") Yiul.Report.makeStatsReport hieFileResults
 
-    whenFlag topLevelBindingPackageReportFlag do
-      Yiul.Report.writeReport (reportsDir </> "top-level-binding-package-report.tsv") Yiul.Report.makeTopLevelBindingPackageReport hieFileResults
+      whenFlag topLevelBindingPackageReportFlag do
+        Yiul.Report.writeReport (reportsDir </> "top-level-binding-package-report.tsv") Yiul.Report.makeTopLevelBindingPackageReport hieFileResults
 
-    whenFlag topLevelBindingModuleReportFlag do
-      Yiul.Report.writeReport (reportsDir </> "top-level-binding-module-report.tsv") Yiul.Report.makeTopLevelBindingModuleReport hieFileResults
+      whenFlag topLevelBindingModuleReportFlag do
+        Yiul.Report.writeReport (reportsDir </> "top-level-binding-module-report.tsv") Yiul.Report.makeTopLevelBindingModuleReport hieFileResults
 
-    whenFlag astReportFlag do
-      Yiul.Report.processASTs hieFileResults
-      Yiul.Report.writeReport (reportsDir </> "ast-report.tsv") Yiul.Report.makeAstStatsReport hieFileResults
+      whenFlag astReportFlag do
+        Yiul.Report.processASTs hieFileResults
+        Yiul.Report.writeReport (reportsDir </> "ast-report.tsv") Yiul.Report.makeAstStatsReport hieFileResults
+
+      _ <- Yiul.Report.organizeByPackages hieFileResults
+      pure ()
