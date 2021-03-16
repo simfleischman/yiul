@@ -12,11 +12,6 @@ Generate list of .hie files in current directory.
 find . -name '*.hie' > hie-files.txt
 ```
 
-Use ghc-pkg to dump package level information.
-```
-stack exec ghc-pkg -- dump > ghc-pkg.txt
-```
-
 Run the program.
 ```
 stack run yiul -- --project-dir path/to/project --hie-files path/to/hie-files.txt --ghc-pkg path/to/ghc-pkg.txt
