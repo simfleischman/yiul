@@ -11,11 +11,12 @@ module Yiul.Report where
 
 import qualified Avail
 import qualified Control.Lens as Lens
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Data.Array ((!))
 import qualified Data.Array as Array
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
+import qualified Data.Either as Either
 import Data.Generics.Labels ()
 import qualified Data.List as List
 import Data.Map (Map)
@@ -505,7 +506,7 @@ srcLocToText (SrcLoc.UnhelpfulLoc fastString) = "UnhelpfulLoc:" <> (Text.pack . 
 data Package
   = PackageUnitId Module.UnitId
   | PackageExe FilePath -- HIE files don't have unambiguous names for exes (and tests) so we approximate by the folder of the hie file (only works if hie files are in the build output dirs; if all hie files are in the same dir, then this approach won't work)
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 organizeByPackages :: [(HieFilePath, HieFileResult)] -> IO (Map Package [(HieFilePath, HieFileResult)])
 organizeByPackages inputPairs = do
@@ -513,10 +514,35 @@ organizeByPackages inputPairs = do
         let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
             unitId = Module.moduleUnitId hieModule
             moduleName = Module.moduleNameString . Module.moduleName $ hieModule
-        in unitId == Module.mainUnitId && moduleName == "Main"
-  let (exeMains, _others) = List.partition isExeMain inputPairs
-  mapM_ (putStrLn . removeDotDirectories . unConst . fst) exeMains
-  pure Map.empty
+         in unitId == Module.mainUnitId && moduleName == "Main"
+      (exeMains, nonExeMains) = List.partition isExeMain inputPairs
+      exeMainMap = Map.fromList $ fmap (\pair@(hieFilePath, _) -> (PackageExe . FilePath.takeDirectory . removeDotDirectories . unConst $ hieFilePath, [pair])) exeMains
+      isExeNonMain (_hieFilePath, hieFileResult) =
+        let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
+            unitId = Module.moduleUnitId hieModule
+            moduleName = Module.moduleNameString . Module.moduleName $ hieModule
+         in unitId == Module.mainUnitId && moduleName /= "Main"
+      (exeNonMains, normalPackages) = List.partition isExeNonMain nonExeMains
+      normalPackagePairs = fmap (\pair -> (PackageUnitId . Module.moduleUnitId . HieTypes.hie_module . HieBin.hie_file_result . snd $ pair, [pair])) normalPackages
+      findMatchingExeMain pair@(hieFilePath, _) = go (FilePath.takeDirectory . removeDotDirectories . unConst $ hieFilePath)
+        where
+          go [] = Left pair
+          go "." = Left pair
+          go potential =
+            if Map.member (PackageExe potential) exeMainMap
+              then Right (PackageExe potential, [pair])
+              else go (FilePath.takeDirectory potential)
+      (exeErrors, exePairs) = Either.partitionEithers $ fmap findMatchingExeMain exeNonMains
+
+  unless (null exeErrors) do
+    putStrLn "Ignoring HIE files unable to find a matching path with Main (probably due to using GHC's main-is to point to a different module other than Main)"
+    mapM_ (putStrLn . unConst . fst) exeErrors
+
+  pure $
+    Map.unionWith
+      (<>)
+      exeMainMap
+      (Map.fromListWith (<>) (normalPackagePairs <> exePairs))
 
 instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10) a b where
   each f ~(a, b, c, d, e, g, h, i, j, k) = (,,,,,,,,,) <$> f a <*> f b <*> f c <*> f d <*> f e <*> f g <*> f h <*> f i <*> f j <*> f k
