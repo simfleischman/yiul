@@ -12,6 +12,7 @@ module Yiul.Const where
 import Control.Applicative
 import Control.Monad (when)
 import Data.String (IsString)
+import Data.Text (Text)
 import GHC.TypeLits (Symbol)
 import qualified System.FilePath as FilePath
 
@@ -30,6 +31,10 @@ type AstReportFlag = Const Bool "AstReportFlag"
 type TopLevelBindingPackageReportFlag = Const Bool "TopLevelBindingPackageReportFlag"
 
 type TopLevelBindingModuleReportFlag = Const Bool "TopLevelBindingModuleReportFlag"
+
+type ModuleName = Const Text "ModuleName"
+
+type PackageName = Const Text "PackageName"
 
 mkConst :: forall t (s :: Symbol) a. (t ~ Const a s) => a -> t
 mkConst = Const

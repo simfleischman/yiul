@@ -24,6 +24,7 @@ dependencies:
 - optparse-applicative
 - pretty-simple
 - text
+- topograph
 
 library:
   source-dirs: src
