@@ -46,11 +46,13 @@ main =
                   <> help "A path to a file that lists the .hie files to process"
               )
           )
-        <*> strOption
-          ( long "ghc-pkg-dump"
-              <> short 'g'
-              <> metavar "FILE"
-              <> help "A path to a file that contains the dump of 'ghc-pkg dump'"
+        <*> optional
+          ( strOption
+              ( long "ghc-pkg-dump"
+                  <> short 'g'
+                  <> metavar "FILE"
+                  <> help "A path to a file that contains the dump of 'ghc-pkg dump'"
+              )
           )
         <*> switchFlag @AstReportFlag
           ( long "ast-report"
@@ -74,7 +76,7 @@ switchFlag = fmap (mkConst @t) . switch
 run ::
   ProjectDir ->
   Maybe HieFileListPath ->
-  GhcPkgDumpPath ->
+  Maybe GhcPkgDumpPath ->
   AstReportFlag ->
   TopLevelBindingPackageReportFlag ->
   TopLevelBindingModuleReportFlag ->
@@ -82,19 +84,23 @@ run ::
 run
   projectDir
   mHieFileListPath
-  ghcPkgDump
+  mGhcPkgDump
   astReportFlag
   topLevelBindingPackageReportFlag
   topLevelBindingModuleReportFlag =
     do
-      putStrLn $ "Loading ghc-pkg dump output: " <> unConst ghcPkgDump
-      bytes <- ByteString.Lazy.readFile (unConst ghcPkgDump)
-      case Yiul.GhcPkg.parsePackages bytes of
-        Left errs -> do
-          mapM_ putStrLn errs
-          fail "See above errors parsing ghc-pkg dump output"
-        Right results -> do
-          putStrLn $ "Loaded " <> (show . length) results <> " package infos"
+      case mGhcPkgDump of
+        Nothing -> pure ()
+        Just ghcPkgDump ->
+          do
+            putStrLn $ "Loading ghc-pkg dump output: " <> unConst ghcPkgDump
+            bytes <- ByteString.Lazy.readFile (unConst ghcPkgDump)
+            case Yiul.GhcPkg.parsePackages bytes of
+              Left errs -> do
+                mapM_ putStrLn errs
+                fail "See above errors parsing ghc-pkg dump output"
+              Right results -> do
+                putStrLn $ "Loaded " <> (show . length) results <> " package infos"
 
       hieFilePaths <-
         case mHieFileListPath of
