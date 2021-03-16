@@ -269,8 +269,8 @@ makeTopLevelBindingPackageReport = makeTsv . (headerLine :) . concatMap handlePa
               . HieTypes.nodeAnnotations
               $ nodeInfo
           termUnitIds = termUnitIdSet ast
-          allTypeUnitIds = collectFromTypeIndexSet collectUnitIdsForHieType VisibleAndInvsibleArgs hieFile (typeIndexSetForAst ast)
-          visibleTypeUnitIds = collectFromTypeIndexSet collectUnitIdsForHieType OnlyVisibleArgs hieFile (typeIndexSetForAst ast)
+          allTypeUnitIds = collectFromTypeIndexSet collectUnitIdsForHieType VisibleAndInvsibleArgs hieFile (getTypeIndexesRecursively combinedLocalTypeIndexes ast)
+          visibleTypeUnitIds = collectFromTypeIndexSet collectUnitIdsForHieType OnlyVisibleArgs hieFile (getTypeIndexesRecursively combinedLocalTypeIndexes ast)
           currentLine =
             ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
               (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
@@ -298,9 +298,9 @@ makeTopLevelBindingModuleReport = makeTsv . (headerLine :) . concatMap handlePai
         "Node Annotations",
         "Descendants",
         "Lines",
-        "Module Count",
-        "Visible Module Count",
-        "Modules"
+        "Node Type Module Count",
+        "Identifier Type Module Count",
+        "Term Module Count"
       )
     handlePair (_filePath, hieFileResult) =
       let hieFile = HieBin.hie_file_result hieFileResult
@@ -331,10 +331,8 @@ makeTopLevelBindingModuleReport = makeTsv . (headerLine :) . concatMap handlePai
               . HieTypes.nodeAnnotations
               $ nodeInfo
           termModules = termModuleSet ast
-          allTypeModules = collectFromTypeIndexSet collectModulesForHieType VisibleAndInvsibleArgs hieFile (typeIndexSetForAst ast)
-          visibleTypeModules = collectFromTypeIndexSet collectModulesForHieType OnlyVisibleArgs hieFile (typeIndexSetForAst ast)
-          combinedModules = termModules <> allTypeModules
-          combinedVisibleModules = termModules <> visibleTypeModules
+          nodeTypeModules = collectFromTypeIndexSet collectModulesForHieType OnlyVisibleArgs hieFile (getTypeIndexesRecursively localNodeTypeIndexes ast)
+          identifierTypeModules = collectFromTypeIndexSet collectModulesForHieType OnlyVisibleArgs hieFile (getTypeIndexesRecursively localIdentifierTypeIndexes ast)
           currentLine =
             ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
               (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
@@ -342,28 +340,34 @@ makeTopLevelBindingModuleReport = makeTsv . (headerLine :) . concatMap handlePai
               nodeAnnotationsText,
               (Text.pack . show . recursiveAstCount) ast,
               (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast,
-              (Text.pack . show . Set.size) combinedModules,
-              (Text.pack . show . Set.size) combinedVisibleModules,
-              (Text.intercalate ", " . fmap (Text.pack . Module.moduleStableString) . Set.toList) combinedModules
+              (Text.pack . show . Set.size) nodeTypeModules,
+              (Text.pack . show . Set.size) identifierTypeModules,
+              (Text.pack . show . Set.size) termModules
             )
        in [currentLine]
 
 nameToUnitIdSet :: Name.Name -> Set Module.UnitId
 nameToUnitIdSet = Set.fromList . fmap Module.moduleUnitId . Maybe.maybeToList . Name.nameModule_maybe
 
-localTypeIndexSetForAst :: HieTypes.HieAST HieTypes.TypeIndex -> Set HieTypes.TypeIndex
-localTypeIndexSetForAst ast =
-  let nodeInfo = HieTypes.nodeInfo ast
-      nodeTypeIndexSet = Set.fromList . HieTypes.nodeType $ nodeInfo
-      identifierDetails :: Set HieTypes.TypeIndex
-      identifierDetails = Set.fromList . Maybe.mapMaybe HieTypes.identType . Map.elems . HieTypes.nodeIdentifiers $ nodeInfo
-   in nodeTypeIndexSet <> identifierDetails
+combinedLocalTypeIndexes :: HieTypes.HieAST HieTypes.TypeIndex -> Set HieTypes.TypeIndex
+combinedLocalTypeIndexes ast = localNodeTypeIndexes ast <> localIdentifierTypeIndexes ast
 
-typeIndexSetForAst :: HieTypes.HieAST HieTypes.TypeIndex -> Set HieTypes.TypeIndex
-typeIndexSetForAst ast =
+localNodeTypeIndexes :: HieTypes.HieAST HieTypes.TypeIndex -> Set HieTypes.TypeIndex
+localNodeTypeIndexes = Set.fromList . HieTypes.nodeType . HieTypes.nodeInfo
+
+localIdentifierTypeIndexes :: HieTypes.HieAST HieTypes.TypeIndex -> Set HieTypes.TypeIndex
+localIdentifierTypeIndexes = Set.fromList . Maybe.mapMaybe HieTypes.identType . Map.elems . HieTypes.nodeIdentifiers . HieTypes.nodeInfo
+
+getTypeIndexesRecursively ::
+  ( HieTypes.HieAST HieTypes.TypeIndex ->
+    Set HieTypes.TypeIndex
+  ) ->
+  HieTypes.HieAST HieTypes.TypeIndex ->
+  Set HieTypes.TypeIndex
+getTypeIndexesRecursively localGetIndexes ast =
   let nodeChildren = HieTypes.nodeChildren ast
-      childrenSets = typeIndexSetForAst <$> nodeChildren
-   in localTypeIndexSetForAst ast <> Set.unions childrenSets
+      childrenSets = getTypeIndexesRecursively localGetIndexes <$> nodeChildren
+   in localGetIndexes ast <> Set.unions childrenSets
 
 data VisibleArgs = VisibleAndInvsibleArgs | OnlyVisibleArgs | OnlyInvisibleArgs
 
@@ -384,7 +388,7 @@ collectUnitIdsForHieType (HieTypes.HCastTy _index) = Set.empty
 collectUnitIdsForHieType HieTypes.HCoercionTy = Set.empty
 
 maybeToSet :: Maybe a -> Set a
-maybeToSet Nothing = Set.empty 
+maybeToSet Nothing = Set.empty
 maybeToSet (Just x) = Set.singleton x
 
 collectModulesForHieType :: HieTypes.HieType HieTypes.TypeIndex -> Set Module.Module
