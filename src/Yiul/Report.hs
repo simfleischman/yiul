@@ -177,7 +177,6 @@ makeAstStatsReport = makeTsv . (headerLine :) . concatMap handlePair
     headerLine =
       ( "Span",
         "End",
-        "UnitId",
         "Module",
         "Node Annotations",
         "Node Children Count",
@@ -213,8 +212,7 @@ makeAstStatsReport = makeTsv . (headerLine :) . concatMap handlePair
           currentLine =
             ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
               (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
-              (makeUnitIdText . Module.moduleUnitId) moduleValue,
-              (Text.pack . Module.moduleNameString . Module.moduleName) moduleValue,
+              (Text.pack . Module.moduleStableString) moduleValue,
               nodeAnnotationsText,
               (Text.pack . show . length . HieTypes.nodeChildren) ast,
               (Text.pack . show . length . HieTypes.nodeType . HieTypes.nodeInfo) ast,
@@ -296,10 +294,12 @@ makeTopLevelBindingModuleReport = makeTsv . (headerLine :) . concatMap handlePai
     headerLine =
       ( "Span",
         "End",
+        "Module",
         "Node Annotations",
         "Descendants",
         "Lines",
         "Module Count",
+        "Visible Module Count",
         "Modules"
       )
     handlePair (_filePath, hieFileResult) =
@@ -332,14 +332,18 @@ makeTopLevelBindingModuleReport = makeTsv . (headerLine :) . concatMap handlePai
               $ nodeInfo
           termModules = termModuleSet ast
           allTypeModules = collectFromTypeIndexSet collectModulesForHieType VisibleAndInvsibleArgs hieFile (typeIndexSetForAst ast)
+          visibleTypeModules = collectFromTypeIndexSet collectModulesForHieType OnlyVisibleArgs hieFile (typeIndexSetForAst ast)
           combinedModules = termModules <> allTypeModules
+          combinedVisibleModules = termModules <> visibleTypeModules
           currentLine =
             ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
               (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
+              (Text.pack . Module.moduleStableString . HieTypes.hie_module) hieFile,
               nodeAnnotationsText,
               (Text.pack . show . recursiveAstCount) ast,
               (Text.pack . show . (\span -> 1 + SrcLoc.srcSpanEndLine span - SrcLoc.srcSpanStartLine span) . HieTypes.nodeSpan) ast,
               (Text.pack . show . Set.size) combinedModules,
+              (Text.pack . show . Set.size) combinedVisibleModules,
               (Text.intercalate ", " . fmap (Text.pack . Module.moduleStableString) . Set.toList) combinedModules
             )
        in [currentLine]
