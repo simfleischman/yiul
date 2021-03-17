@@ -519,7 +519,8 @@ makePackage (hieFilePath, hieFileResult) =
               -- assume for module name like 'Data.Something.Other' that the .hie file is in a directory like 'some/dir/Data/Something/Other.hie'
               -- the result would be 'PackageExe "some/dir"'
               basePath = iterateTakeDirectory moduleNameDepth (unConst hieFilePath)
-           in PackageExe basePath
+              stackTweaks = (Yiul.Directory.removeFinalNestedTmp . Yiul.Directory.removeStackWorkThroughBuild) basePath
+           in PackageExe stackTweaks
 
 organizeByPackages :: [(HieFilePath, HieFileResult)] -> IO (Map Package [(HieFilePath, HieFileResult)])
 organizeByPackages inputPairs = do
