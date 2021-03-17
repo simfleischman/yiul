@@ -16,6 +16,7 @@ import Data.Array ((!))
 import qualified Data.Array as Array
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
+import qualified Data.Char as Char
 import Data.Generics.Labels ()
 import qualified Data.List as List
 import Data.Map (Map)
@@ -505,6 +506,24 @@ data Package
   | PackageExe FilePath -- HIE files don't have unambiguous names for exes (and tests) so we approximate by the folder of the hie file (only works if hie files are in the build output dirs; if all hie files are in the same dir, then this approach won't work)
   deriving (Eq, Ord, Show)
 
+-- | Makes a single directory for a given package, possibly long name but without slashes, etc.
+makePackageDirectory :: Package -> FilePath
+makePackageDirectory (PackageUnitId unitId) = "lib-" <> (FastString.unpackFS . Module.unitIdFS) unitId
+makePackageDirectory (PackageExe path) = "exe-" <> alphaNumericDashPath path
+
+isGoodPathChar :: Char -> Bool
+isGoodPathChar c = Char.isAlphaNum c || c == '-' || c == '_'
+
+alphaNumericDashPath :: FilePath -> FilePath
+alphaNumericDashPath [] = []
+alphaNumericDashPath (c : rest) | isGoodPathChar c = c : alphaNumericDashPath rest
+alphaNumericDashPath (_ : rest) = '_' : alphaNumericDashPath (dropWhile (not . isGoodPathChar) rest)
+
+-- | Makes a single directory for a fully qualified module name, could also work as a file name.
+-- 'Data.Something.Else' becomes 'Data-Something-Else'
+makeModuleDirectory :: Module.ModuleName -> FilePath
+makeModuleDirectory = fmap (\c -> if c == '.' then '-' else c) . Module.moduleNameString
+
 makePackage :: (HieFilePath, HieFileResult) -> Package
 makePackage (hieFilePath, hieFileResult) =
   let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
@@ -536,11 +555,19 @@ writePackagesReport reportPath packageMap = do
     makeReport = makeTsv . (headerLine :) . concatMap handlePair
     headerLine =
       ( "Package",
-        "Module"
+        "Module",
+        "Package Directory",
+        "Module Directory"
       )
     handlePair (package, pairs) =
       fmap
-        (\pair -> ((Text.pack . show) package, (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair))
+        ( \pair ->
+            ( (Text.pack . show) package,
+              (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair,
+              (Text.pack . makePackageDirectory) package,
+              (Text.pack . makeModuleDirectory . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair
+            )
+        )
         pairs
 
 instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10) a b where
