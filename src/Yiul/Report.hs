@@ -510,39 +510,19 @@ data Package
 
 organizeByPackages :: [(HieFilePath, HieFileResult)] -> IO (Map Package [(HieFilePath, HieFileResult)])
 organizeByPackages inputPairs = do
-  let isExeMain (_hieFilePath, hieFileResult) =
+  let makePackage (hieFilePath, hieFileResult) =
         let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
             unitId = Module.moduleUnitId hieModule
-            moduleName = Module.moduleNameString . Module.moduleName $ hieModule
-         in unitId == Module.mainUnitId && moduleName == "Main"
-      (exeMains, nonExeMains) = List.partition isExeMain inputPairs
-      exeMainMap = Map.fromList $ fmap (\pair@(hieFilePath, _) -> (PackageExe . FilePath.takeDirectory . removeDotDirectories . unConst $ hieFilePath, [pair])) exeMains
-      isExeNonMain (_hieFilePath, hieFileResult) =
-        let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
-            unitId = Module.moduleUnitId hieModule
-            moduleName = Module.moduleNameString . Module.moduleName $ hieModule
-         in unitId == Module.mainUnitId && moduleName /= "Main"
-      (exeNonMains, normalPackages) = List.partition isExeNonMain nonExeMains
-      normalPackagePairs = fmap (\pair -> (PackageUnitId . Module.moduleUnitId . HieTypes.hie_module . HieBin.hie_file_result . snd $ pair, [pair])) normalPackages
-      findMatchingExeMain pair@(hieFilePath, _) = go (FilePath.takeDirectory . removeDotDirectories . unConst $ hieFilePath)
-        where
-          go [] = Left pair
-          go "." = Left pair
-          go potential =
-            if Map.member (PackageExe potential) exeMainMap
-              then Right (PackageExe potential, [pair])
-              else go (FilePath.takeDirectory potential)
-      (exeErrors, exePairs) = Either.partitionEithers $ fmap findMatchingExeMain exeNonMains
-
-  unless (null exeErrors) do
-    putStrLn "Ignoring HIE files unable to find a matching path with Main (probably due to using GHC's main-is to point to a different module other than Main)"
-    mapM_ (putStrLn . unConst . fst) exeErrors
-
-  let finalMap =
-        Map.unionWith
-          (<>)
-          exeMainMap
-          (Map.fromListWith (<>) (normalPackagePairs <> exePairs))
+         in if unitId /= Module.mainUnitId
+              then PackageUnitId unitId
+              else
+                let moduleName = Module.moduleNameString . Module.moduleName $ hieModule
+                    moduleNameDepth = (+ 1) . length . filter (== '.') $ moduleName
+                    iterateTakeDirectory n path | n > 0 = iterateTakeDirectory (n - 1) (FilePath.takeDirectory path)
+                    iterateTakeDirectory _ path = path
+                    basePath = iterateTakeDirectory moduleNameDepth (removeDotDirectories . unConst $ hieFilePath)
+                 in PackageExe basePath
+      finalMap = Map.fromListWith (<>) $ fmap (\x -> (makePackage x, [x])) inputPairs
 
   putStrLn $ "Loaded " <> (show . length . Map.keys) finalMap <> " packages with a total of " <> (show . length . concat . Map.elems) finalMap <> " modules."
 
