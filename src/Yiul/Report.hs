@@ -37,7 +37,7 @@ import qualified SrcLoc
 import qualified System.FilePath as FilePath
 import qualified UniqSet
 import Yiul.Const
-import Yiul.Directory (removeDotDirectories)
+import qualified Yiul.Directory
 import Prelude hiding (span)
 
 makeVersionReport :: [(HieFilePath, HieFileResult)] -> Text
@@ -52,7 +52,7 @@ makeVersionReport = makeTsv . (headerLine :) . fmap makeLine
     makeLine (filePath, hieFileResult) =
       let hieFile = HieBin.hie_file_result hieFileResult
        in ( (Text.pack . unConst) filePath,
-            (Text.pack . removeDotDirectories . HieTypes.hie_hs_file) hieFile,
+            (Text.pack . Yiul.Directory.removeDotDirectories . HieTypes.hie_hs_file) hieFile,
             (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
             (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
           )
@@ -74,7 +74,7 @@ makeStatsReport = makeTsv . (headerLine :) . fmap makeLine
       let hieFile = HieBin.hie_file_result hieFileResult
           hieModule = HieTypes.hie_module hieFile
        in ( (Text.pack . unConst) filePath,
-            (Text.pack . removeDotDirectories . HieTypes.hie_hs_file) hieFile,
+            (Text.pack . Yiul.Directory.removeDotDirectories . HieTypes.hie_hs_file) hieFile,
             (makeUnitIdText . Module.moduleUnitId) hieModule,
             (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
             (Text.pack . show . (\(high, low) -> abs (high - low) + 1) . Array.bounds . HieTypes.hie_types) hieFile,
@@ -479,7 +479,7 @@ realSrcSpanToText srcSpan =
 
 realSrcLocToText :: SrcLoc.RealSrcLoc -> Text
 realSrcLocToText loc =
-  (Text.pack . removeDotDirectories . FastString.unpackFS . SrcLoc.srcLocFile) loc
+  (Text.pack . Yiul.Directory.removeDotDirectories . FastString.unpackFS . SrcLoc.srcLocFile) loc
     <> ":"
     <> (Text.pack . show . SrcLoc.srcLocLine) loc
     <> ":"
