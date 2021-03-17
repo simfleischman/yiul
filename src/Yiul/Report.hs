@@ -11,12 +11,11 @@ module Yiul.Report where
 
 import qualified Avail
 import qualified Control.Lens as Lens
-import Control.Monad (unless, when)
+import Control.Monad (when)
 import Data.Array ((!))
 import qualified Data.Array as Array
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
-import qualified Data.Either as Either
 import Data.Generics.Labels ()
 import qualified Data.List as List
 import Data.Map (Map)
