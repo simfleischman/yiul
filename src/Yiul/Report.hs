@@ -508,25 +508,27 @@ data Package
   | PackageExe FilePath -- HIE files don't have unambiguous names for exes (and tests) so we approximate by the folder of the hie file (only works if hie files are in the build output dirs; if all hie files are in the same dir, then this approach won't work)
   deriving (Eq, Ord, Show)
 
+makePackage :: (HieFilePath, HieFileResult) -> Package
+makePackage (hieFilePath, hieFileResult) =
+  let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
+      unitId = Module.moduleUnitId hieModule
+   in if unitId /= Module.mainUnitId
+        then PackageUnitId unitId
+        else
+          let moduleName = Module.moduleNameString . Module.moduleName $ hieModule
+              moduleNameDepth = (+ 1) . length . filter (== '.') $ moduleName
+              iterateTakeDirectory n path | n > 0 = iterateTakeDirectory (n - 1) (FilePath.takeDirectory path)
+              iterateTakeDirectory _ path = path
+              -- assume for module name like 'Data.Something.Other' that the .hie file is in a directory like 'some/dir/Data/Something/Other.hie'
+              -- the result would be 'PackageExe "some/dir"'
+              basePath = iterateTakeDirectory moduleNameDepth (removeDotDirectories . unConst $ hieFilePath)
+           in PackageExe basePath
+
 organizeByPackages :: [(HieFilePath, HieFileResult)] -> IO (Map Package [(HieFilePath, HieFileResult)])
 organizeByPackages inputPairs = do
-  let makePackage (hieFilePath, hieFileResult) =
-        let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
-            unitId = Module.moduleUnitId hieModule
-         in if unitId /= Module.mainUnitId
-              then PackageUnitId unitId
-              else
-                let moduleName = Module.moduleNameString . Module.moduleName $ hieModule
-                    moduleNameDepth = (+ 1) . length . filter (== '.') $ moduleName
-                    iterateTakeDirectory n path | n > 0 = iterateTakeDirectory (n - 1) (FilePath.takeDirectory path)
-                    iterateTakeDirectory _ path = path
-                    basePath = iterateTakeDirectory moduleNameDepth (removeDotDirectories . unConst $ hieFilePath)
-                 in PackageExe basePath
-      finalMap = Map.fromListWith (<>) $ fmap (\x -> (makePackage x, [x])) inputPairs
-
-  putStrLn $ "Loaded " <> (show . length . Map.keys) finalMap <> " packages with a total of " <> (show . length . concat . Map.elems) finalMap <> " modules."
-
-  pure finalMap
+  let result = Map.fromListWith (<>) $ fmap (\x -> (makePackage x, [x])) inputPairs
+  putStrLn $ "Loaded " <> (show . length . Map.keys) result <> " packages with a total of " <> (show . length . concat . Map.elems) result <> " modules."
+  pure result
 
 writePackagesReport :: ReportsPath -> Map Package [(HieFilePath, HieFileResult)] -> IO ()
 writePackagesReport reportPath packageMap = do
