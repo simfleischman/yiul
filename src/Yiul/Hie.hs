@@ -16,6 +16,7 @@ import qualified System.Directory.Recursive as Directory.Recursive
 import qualified System.FilePath as FilePath
 import qualified UniqSupply
 import Yiul.Const
+import Yiul.Directory (removeDotDirectories)
 
 topLevelLoadHieFiles :: ProjectDir -> [HieFilePath] -> IO [(HieFilePath, HieFileResult)]
 topLevelLoadHieFiles projectDir hieFilePaths = do
@@ -37,7 +38,7 @@ loadHieFiles initialNameCache projectDir = foldrM go (initialNameCache, [])
 findHieFiles :: ProjectDir -> IO [HieFilePath]
 findHieFiles dir = do
   allFiles <-
-    fmap (mkConst @HieFilePath)
+    fmap (mkConst @HieFilePath . removeDotDirectories)
       <$> Directory.Recursive.getFilesRecursive (unConst dir)
   let filteredFiles = filter (\path -> FilePath.takeExtension (unConst path) == ".hie") allFiles
   pure $ fmap (makeRelativeFilePath dir) filteredFiles
@@ -51,6 +52,6 @@ loadHieFileList projectDir path = do
           then makeRelativeFilePath projectDir file
           else file
   pure $
-    fmap (tryMakeRelative . mkConst . Text.unpack) $
+    fmap (tryMakeRelative . mkConst . removeDotDirectories . Text.unpack) $
       filter (not . Text.null) $
         Text.lines text

@@ -37,6 +37,7 @@ import qualified SrcLoc
 import qualified System.FilePath as FilePath
 import qualified UniqSet
 import Yiul.Const
+import Yiul.Directory (removeDotDirectories)
 import Prelude hiding (span)
 
 makeVersionReport :: [(HieFilePath, HieFileResult)] -> Text
@@ -50,7 +51,7 @@ makeVersionReport = makeTsv . (headerLine :) . fmap makeLine
       )
     makeLine (filePath, hieFileResult) =
       let hieFile = HieBin.hie_file_result hieFileResult
-       in ( (Text.pack . removeDotDirectories . unConst) filePath,
+       in ( (Text.pack . unConst) filePath,
             (Text.pack . removeDotDirectories . HieTypes.hie_hs_file) hieFile,
             (Text.pack . show . HieBin.hie_file_result_version) hieFileResult,
             (Text.Encoding.decodeUtf8 . HieBin.hie_file_result_ghc_version) hieFileResult
@@ -72,7 +73,7 @@ makeStatsReport = makeTsv . (headerLine :) . fmap makeLine
     makeLine (filePath, hieFileResult) =
       let hieFile = HieBin.hie_file_result hieFileResult
           hieModule = HieTypes.hie_module hieFile
-       in ( (Text.pack . removeDotDirectories . unConst) filePath,
+       in ( (Text.pack . unConst) filePath,
             (Text.pack . removeDotDirectories . HieTypes.hie_hs_file) hieFile,
             (makeUnitIdText . Module.moduleUnitId) hieModule,
             (Text.pack . Module.moduleNameString . Module.moduleName) hieModule,
@@ -81,9 +82,6 @@ makeStatsReport = makeTsv . (headerLine :) . fmap makeLine
             (Text.pack . show . Map.size . HieTypes.getAsts . HieTypes.hie_asts) hieFile,
             (Text.pack . show . initialAstChildrenCount) hieFile
           )
-
-removeDotDirectories :: FilePath -> FilePath
-removeDotDirectories = FilePath.joinPath . filter (/= ".") . FilePath.splitDirectories
 
 -- | The Map always seems to have 1 or 0 elements.
 getFirstAstFile :: HieTypes.HieFile -> Text
@@ -520,7 +518,7 @@ makePackage (hieFilePath, hieFileResult) =
               iterateTakeDirectory _ path = path
               -- assume for module name like 'Data.Something.Other' that the .hie file is in a directory like 'some/dir/Data/Something/Other.hie'
               -- the result would be 'PackageExe "some/dir"'
-              basePath = iterateTakeDirectory moduleNameDepth (removeDotDirectories . unConst $ hieFilePath)
+              basePath = iterateTakeDirectory moduleNameDepth (unConst hieFilePath)
            in PackageExe basePath
 
 organizeByPackages :: [(HieFilePath, HieFileResult)] -> IO (Map Package [(HieFilePath, HieFileResult)])
