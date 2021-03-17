@@ -7,12 +7,12 @@ Build with `-fwrite-ide-info` to generate .hie files.
 stack test --no-run-tests --ghc-options -fwrite-ide-info
 ```
 
-Generate list of .hie files in current directory.
+Generate list of .hie files in current directory. This is generally faster than letting yiul do a recursive directory search, especially for large directories.
 ```
 find . -name '*.hie' > hie-files.txt
 ```
 
 Run the program.
 ```
-stack run yiul -- --project-dir path/to/project --hie-files path/to/hie-files.txt --ghc-pkg path/to/ghc-pkg.txt
+stack run yiul -- --project-dir path/to/project --hie-files path/to/hie-files.txt
 ```
