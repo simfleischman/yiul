@@ -18,7 +18,6 @@ import qualified Data.Array as Array
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.Char as Char
-import qualified Data.Either as Either
 import Data.Generics.Labels ()
 import qualified Data.List as List
 import Data.Map (Map)
@@ -575,14 +574,21 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
       concatMap
         ( \pair ->
             let hieFile = (HieBin.hie_file_result . snd) pair
-                astsMap = (HieTypes.getAsts . HieTypes.hie_asts) hieFile
-                allAsts = concatMap HieUtils.flattenAst (Map.elems astsMap)
+                rootAsts = (Map.elems . HieTypes.getAsts . HieTypes.hie_asts) hieFile
+                asts =
+                  case rootAsts of
+                    [ast] ->
+                      if (HieTypes.nodeAnnotations . HieTypes.nodeInfo) ast == Set.singleton ("Module", "Module")
+                        then HieTypes.nodeChildren ast
+                        else error "Root AST is not Module/Module"
+                    [] -> []
+                    _ : _ : _ -> error "Unexpected multiple AST"
                 packageText = (Text.pack . show) package
                 moduleText = (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair
              in concatMap
                   ( \ast ->
-                      let modulesOrNames = Set.toList $ getNameSetForAstExcludingChildren hieFile ast
-                          externalNames = (filter Name.isExternalName . Either.rights) modulesOrNames
+                      let names = Set.toList $ getNameSetForAstRecursively hieFile ast
+                          externalNames = filter Name.isExternalName names
                           makeNameText name = "Name: " <> (Text.pack . Name.nameStableString) name
                           astSpan = HieTypes.nodeSpan ast
                           spanStartText = (realSrcLocToText . SrcLoc.realSrcSpanStart) astSpan
@@ -598,7 +604,7 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
                             )
                             externalNames
                   )
-                  allAsts
+                  asts
         )
         pairs
 
@@ -607,17 +613,22 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
 getNameSetFromType :: HieTypes.HieFile -> HieTypes.TypeIndex -> Set Name.Name
 getNameSetFromType hieFile typeIndex = collectFromTypeIndexSet collectNamesForHieType VisibleAndInvsibleArgs hieFile (Set.singleton typeIndex)
 
-getNameSetForAstExcludingChildren :: HieTypes.HieFile -> HieTypes.HieAST HieTypes.TypeIndex -> Set (Either Module.ModuleName Name.Name)
+getNameSetForAstExcludingChildren :: HieTypes.HieFile -> HieTypes.HieAST HieTypes.TypeIndex -> Set Name.Name
 getNameSetForAstExcludingChildren hieFile ast =
   let nodeTypeNames = (Set.unions . fmap (getNameSetFromType hieFile) . HieTypes.nodeType . HieTypes.nodeInfo) ast
-      identifierNames (Left moduleName) = Set.singleton (Left moduleName)
-      identifierNames (Right name) = Set.singleton (Right name)
+      identifierNames (Left _moduleName) = Set.empty
+      identifierNames (Right name) = Set.singleton name
       identifierDetailsNames = maybe Set.empty (getNameSetFromType hieFile) . HieTypes.identType
-      identifierPairNames (identifier, details) = Set.union (identifierNames identifier) (Set.map Right . identifierDetailsNames $ details)
+      identifierPairNames (identifier, details) = Set.union (identifierNames identifier) (identifierDetailsNames details)
       allIdentifierNames = (Set.unions . fmap identifierPairNames . Map.assocs . HieTypes.nodeIdentifiers . HieTypes.nodeInfo) ast
-   in Set.union (Set.map Right nodeTypeNames) allIdentifierNames
+   in Set.union nodeTypeNames allIdentifierNames
 
-getAllNamesForFile :: HieTypes.HieFile -> Set (Either Module.ModuleName Name.Name)
+getNameSetForAstRecursively :: HieTypes.HieFile -> HieTypes.HieAST HieTypes.TypeIndex -> Set Name.Name
+getNameSetForAstRecursively hieFile ast =
+  let nameSets = fmap (getNameSetForAstExcludingChildren hieFile) (HieUtils.flattenAst ast)
+   in Set.unions nameSets
+
+getAllNamesForFile :: HieTypes.HieFile -> Set Name.Name
 getAllNamesForFile hieFile =
   let astsMap = (HieTypes.getAsts . HieTypes.hie_asts) hieFile
       allAsts = concatMap HieUtils.flattenAst (Map.elems astsMap)
