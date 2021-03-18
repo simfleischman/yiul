@@ -566,45 +566,24 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
     headerLine =
       ( "Package",
         "Module",
-        "Span Start",
-        "Span End",
-        "Name"
+        "Dependends on"
       )
     handlePair (package, pairs) =
       concatMap
         ( \pair ->
             let hieFile = (HieBin.hie_file_result . snd) pair
-                rootAsts = (Map.elems . HieTypes.getAsts . HieTypes.hie_asts) hieFile
-                asts =
-                  case rootAsts of
-                    [ast] ->
-                      if (HieTypes.nodeAnnotations . HieTypes.nodeInfo) ast == Set.singleton ("Module", "Module")
-                        then HieTypes.nodeChildren ast
-                        else error "Root AST is not Module/Module"
-                    [] -> []
-                    _ : _ : _ -> error "Unexpected multiple AST"
+                names = (filter Name.isExternalName . Set.toList . getAllNamesForFile) hieFile
+                modules = (Set.toList . Set.fromList . Maybe.catMaybes . fmap Name.nameModule_maybe) names
                 packageText = (Text.pack . show) package
                 moduleText = (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair
-             in concatMap
-                  ( \ast ->
-                      let names = Set.toList $ getNameSetForAstRecursively hieFile ast
-                          externalNames = filter Name.isExternalName names
-                          makeNameText name = "Name: " <> (Text.pack . Name.nameStableString) name
-                          astSpan = HieTypes.nodeSpan ast
-                          spanStartText = (realSrcLocToText . SrcLoc.realSrcSpanStart) astSpan
-                          spanEndText = (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd) astSpan
-                       in fmap
-                            ( \name ->
-                                ( packageText,
-                                  moduleText,
-                                  spanStartText,
-                                  spanEndText,
-                                  makeNameText name
-                                )
-                            )
-                            externalNames
+             in fmap
+                  ( \moduleValue ->
+                      ( packageText,
+                        moduleText,
+                        (Text.pack . Module.moduleStableString) moduleValue
+                      )
                   )
-                  asts
+                  modules
         )
         pairs
 
