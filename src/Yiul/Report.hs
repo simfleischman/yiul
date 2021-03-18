@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
@@ -514,14 +515,14 @@ srcLocToText (SrcLoc.RealSrcLoc loc) =
 srcLocToText (SrcLoc.UnhelpfulLoc fastString) = "UnhelpfulLoc:" <> (Text.pack . FastString.unpackFS) fastString
 
 data Package
-  = PackageUnitId Module.UnitId
+  = PackageUnitId LibraryId
   | PackageExe PackageExeId -- HIE files don't have unambiguous names for exes (and tests) so we approximate by the folder of the hie file (only works if hie files are in the build output dirs; if all hie files are in the same dir, then this approach won't work)
   deriving (Eq, Ord, Show)
 
 -- | Makes a single directory for a given package, possibly long name but without slashes, etc.
-makePackageDirectory :: Package -> PackageName
-makePackageDirectory (PackageUnitId unitId) = mkConst $ Text.pack ("lib-" <> (FastString.unpackFS . Module.unitIdFS) unitId)
-makePackageDirectory (PackageExe path) = mkConst $ Text.pack ("exe-" <> (alphaNumericDashPath . unConst) path)
+makePackageDirectory :: Package -> FilePath
+makePackageDirectory (PackageUnitId unitId) = "lib-" <> (Text.unpack . unConst) unitId
+makePackageDirectory (PackageExe path) = "exe-" <> (alphaNumericDashPath . unConst) path
 
 isGoodPathChar :: Char -> Bool
 isGoodPathChar c = Char.isAlphaNum c || c == '-' || c == '_'
@@ -541,7 +542,7 @@ makePackage (hieFilePath, hieFileResult) =
   let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
       unitId = Module.moduleUnitId hieModule
    in if unitId /= Module.mainUnitId
-        then PackageUnitId unitId
+        then PackageUnitId (mkConst @LibraryId . Text.pack . FastString.unpackFS . Module.unitIdFS $ unitId)
         else
           let moduleName = Module.moduleNameString . Module.moduleName $ hieModule
               moduleNameDepth = (+ 1) . length . filter (== '.') $ moduleName
@@ -567,17 +568,21 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
         "Module",
         "Package Directory",
         "Module Directory",
+        "Module Names count",
         "Names count"
       )
     handlePair (package, pairs) =
       fmap
         ( \pair ->
-            let nameSet = (getAllNamesForFile . HieBin.hie_file_result . snd) pair
+            let bothList = (Set.toList . getAllNamesForFile . HieBin.hie_file_result . snd) pair
+                moduleNames = Lens.toListOf (traverse . Lens._Right) bothList
+                names = Lens.toListOf (traverse . Lens._Left) bothList
              in ( (Text.pack . show) package,
                   (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair,
-                  (unConst . makePackageDirectory) package,
+                  (Text.pack . makePackageDirectory) package,
                   (Text.pack . makeModuleDirectory . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair,
-                  (Text.pack . show . Set.size) nameSet
+                  (Text.pack . show . length) moduleNames,
+                  (Text.pack . show . length) names
                 )
         )
         pairs
@@ -587,17 +592,17 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
 getNameSetFromType :: HieTypes.HieFile -> HieTypes.TypeIndex -> Set Name.Name
 getNameSetFromType hieFile typeIndex = collectFromTypeIndexSet collectNamesForHieType VisibleAndInvsibleArgs hieFile (Set.singleton typeIndex)
 
-getNameSetForAstExcludingChildren :: HieTypes.HieFile -> HieTypes.HieAST HieTypes.TypeIndex -> Set Name.Name
+getNameSetForAstExcludingChildren :: HieTypes.HieFile -> HieTypes.HieAST HieTypes.TypeIndex -> Set (Either Module.ModuleName Name.Name)
 getNameSetForAstExcludingChildren hieFile ast =
   let nodeTypeNames = (Set.unions . fmap (getNameSetFromType hieFile) . HieTypes.nodeType . HieTypes.nodeInfo) ast
-      identifierNames (Left _moduleName) = Set.empty -- when do we encounter this? do we need this for Name references?
-      identifierNames (Right name) = Set.singleton name
+      identifierNames (Left moduleName) = Set.singleton (Left moduleName)
+      identifierNames (Right name) = Set.singleton (Right name)
       identifierDetailsNames = maybe Set.empty (getNameSetFromType hieFile) . HieTypes.identType
-      identifierPairNames (identifier, details) = Set.union (identifierNames identifier) (identifierDetailsNames details)
+      identifierPairNames (identifier, details) = Set.union (identifierNames identifier) (Set.map Right . identifierDetailsNames $ details)
       allIdentifierNames = (Set.unions . fmap identifierPairNames . Map.assocs . HieTypes.nodeIdentifiers . HieTypes.nodeInfo) ast
-   in Set.union nodeTypeNames allIdentifierNames
+   in Set.union (Set.map Right nodeTypeNames) allIdentifierNames
 
-getAllNamesForFile :: HieTypes.HieFile -> Set Name.Name
+getAllNamesForFile :: HieTypes.HieFile -> Set (Either Module.ModuleName Name.Name)
 getAllNamesForFile hieFile =
   let astsMap = (HieTypes.getAsts . HieTypes.hie_asts) hieFile
       allAsts = concatMap HieUtils.flattenAst (Map.elems astsMap)

@@ -34,7 +34,7 @@ type TopLevelBindingModuleReportFlag = Const Bool "TopLevelBindingModuleReportFl
 
 type ModuleName = Const Text "ModuleName"
 
-type PackageName = Const Text "PackageName"
+type LibraryId = Const Text "LibraryId"
 
 type PackageExeId = Const FilePath "PackageExeId"
 
