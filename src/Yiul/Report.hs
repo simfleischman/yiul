@@ -106,7 +106,7 @@ makeUnitIdText :: Module.UnitId -> Text
 makeUnitIdText (Module.IndefiniteUnitId _) = "IndefiniteUnitId"
 makeUnitIdText (Module.DefiniteUnitId defUnitId) = (Text.pack . FastString.unpackFS . Module.installedUnitIdFS . Module.unDefUnitId) defUnitId
 
-writeReport :: ReportsPath -> ([(HieFilePath, HieFileResult)] -> Text) -> [(HieFilePath, HieFileResult)] -> IO ()
+writeReport :: ReportsPath -> (a -> Text) -> a -> IO ()
 writeReport reportPath makeReport hieFileResults = do
   putStrLn $ "Writing " <> unConst reportPath
   ByteString.writeFile (unConst reportPath) $ Text.Encoding.encodeUtf8 $ makeReport hieFileResults
@@ -547,12 +547,9 @@ organizeByPackages inputPairs = do
   putStrLn $ "Loaded " <> (show . length . Map.keys) result <> " packages with a total of " <> (show . length . concat . Map.elems) result <> " modules."
   pure result
 
-writePackagesReport :: ReportsPath -> Map Package [(HieFilePath, HieFileResult)] -> IO ()
-writePackagesReport reportPath packageMap = do
-  putStrLn $ "Writing " <> unConst reportPath
-  ByteString.writeFile (unConst reportPath) $ Text.Encoding.encodeUtf8 $ makeReport (Map.assocs packageMap)
+makePackagesReport :: Map Package [(HieFilePath, HieFileResult)] -> Text
+makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assocs
   where
-    makeReport = makeTsv . (headerLine :) . concatMap handlePair
     headerLine =
       ( "Package",
         "Module",

@@ -132,6 +132,6 @@ run
         Yiul.Report.writeReport (reportsDir </> "ast-report.tsv") Yiul.Report.makeAstStatsReport hieFileResults
 
       packageMap <- Yiul.Report.organizeByPackages hieFileResults
-      Yiul.Report.writePackagesReport (reportsDir </> "package-report.tsv") packageMap
+      Yiul.Report.writeReport (reportsDir </> "package-report.tsv") Yiul.Report.makePackagesReport packageMap
 
       pure ()
