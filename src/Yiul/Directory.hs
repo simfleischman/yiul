@@ -5,9 +5,9 @@ import qualified System.FilePath as FilePath
 removeDotDirectories :: FilePath -> FilePath
 removeDotDirectories = FilePath.joinPath . filter (/= ".") . FilePath.splitDirectories
 
--- Changes
--- 'path/to/.stack-work/inner/stack/build/rest' to:
--- 'path/to/rest'
+-- | Changes
+-- @path\/to\/.stack-work\/inner\/stack\/build\/rest@ to:
+-- @path\/to\/rest@
 removeStackWorkThroughBuild :: FilePath -> FilePath
 removeStackWorkThroughBuild input =
   let inputDirs = FilePath.splitDirectories input
@@ -19,7 +19,7 @@ removeStackWorkThroughBuild input =
           _ -> suffix
    in FilePath.joinPath (beforeStackWork <> afterBuild)
 
--- Changes 'path/to/dir-name/dir-name-tmp' to 'path/to/dir-name', else leaves path as-is.
+-- | Changes @path\/to\/dir-name\/dir-name-tmp@ to @path\/to\/dir-name@ when the last two paths are the same but the last path ends in @-tmp@ else leaves path as-is.
 removeFinalNestedTmp :: FilePath -> FilePath
 removeFinalNestedTmp input =
   let split = FilePath.splitDirectories input

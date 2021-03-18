@@ -520,7 +520,7 @@ alphaNumericDashPath (c : rest) | isGoodPathChar c = c : alphaNumericDashPath re
 alphaNumericDashPath (_ : rest) = '_' : alphaNumericDashPath (dropWhile (not . isGoodPathChar) rest)
 
 -- | Makes a single directory for a fully qualified module name, could also work as a file name.
--- 'Data.Something.Else' becomes 'Data-Something-Else'
+-- @Data.Something.Else@ becomes @Data-Something-Else@
 makeModuleDirectory :: Module.ModuleName -> FilePath
 makeModuleDirectory = fmap (\c -> if c == '.' then '-' else c) . Module.moduleNameString
 
