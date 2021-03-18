@@ -8,7 +8,7 @@
 
 module Yiul.Main where
 
-import Control.Monad (join)
+import Control.Monad (join, when)
 import qualified Data.ByteString.Lazy as ByteString.Lazy
 import Data.Generics.Labels ()
 import GHC.TypeLits (Symbol)
@@ -16,6 +16,7 @@ import Options.Applicative hiding (flag)
 import qualified System.Directory as Directory
 import Yiul.Const
 import qualified Yiul.GhcPkg
+import qualified Yiul.Graph
 import qualified Yiul.Hie
 import qualified Yiul.Report
 
@@ -131,7 +132,15 @@ run
         Yiul.Report.processASTs hieFileResults
         Yiul.Report.writeReport (reportsDir </> "ast-report.tsv") Yiul.Report.makeAstStatsReport hieFileResults
 
-      packageMap <- Yiul.Report.organizeByPackages hieFileResults
-      Yiul.Report.writeReport (reportsDir </> "package-report.tsv") Yiul.Report.makePackagesReport packageMap
+      packageMap <- Yiul.Graph.organizeByPackages hieFileResults
+      when False do
+        Yiul.Report.writeReport (reportsDir </> "package-report.tsv") Yiul.Report.makePackagesReport packageMap
+      let dependency = Yiul.Graph.buildModuleDependency packageMap
+      forwardDependency <- Yiul.Graph.makeModuleDependencyClosure dependency
+      reverseDependency <- Yiul.Graph.makeModuleReverseDependencyClosure dependency
+      let twoWay = Yiul.Graph.joinForwardAndReverseDependencies forwardDependency reverseDependency
+      Yiul.Report.writeReport (reportsDir </> "dependency-forward.tsv") Yiul.Report.makeForwardDependencyReport forwardDependency
+      Yiul.Report.writeReport (reportsDir </> "dependency-reverse.tsv") Yiul.Report.makeReverseDependencyReport reverseDependency
+      Yiul.Report.writeReport (reportsDir </> "dependency-summary.tsv") Yiul.Report.makeDependencyReportSummary twoWay
 
       pure ()

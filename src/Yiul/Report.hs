@@ -1,8 +1,10 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -13,11 +15,9 @@ module Yiul.Report where
 import qualified Avail
 import qualified Control.Lens as Lens
 import Control.Monad (when)
-import Data.Array ((!))
 import qualified Data.Array as Array
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
-import qualified Data.Char as Char
 import Data.Generics.Labels ()
 import qualified Data.List as List
 import Data.Map (Map)
@@ -32,15 +32,15 @@ import qualified FastString
 import HieBin (HieFileResult)
 import qualified HieBin
 import qualified HieTypes
-import qualified HieUtils
 import qualified IfaceType
 import qualified Module
 import qualified Name
 import qualified SrcLoc
-import qualified System.FilePath as FilePath
 import qualified UniqSet
 import Yiul.Const
 import qualified Yiul.Directory
+import Yiul.Graph (OurModule, Package, VisibleArgs (..))
+import qualified Yiul.Graph
 import Prelude hiding (span)
 
 makeVersionReport :: [(HieFilePath, HieFileResult)] -> Text
@@ -272,8 +272,8 @@ makeTopLevelBindingPackageReport = makeTsv . (headerLine :) . concatMap handlePa
               . HieTypes.nodeAnnotations
               $ nodeInfo
           termUnitIds = termUnitIdSet ast
-          allTypeUnitIds = collectFromTypeIndexSet collectUnitIdsForHieType VisibleAndInvsibleArgs hieFile (getTypeIndexesRecursively combinedLocalTypeIndexes ast)
-          visibleTypeUnitIds = collectFromTypeIndexSet collectUnitIdsForHieType OnlyVisibleArgs hieFile (getTypeIndexesRecursively combinedLocalTypeIndexes ast)
+          allTypeUnitIds = Yiul.Graph.collectFromTypeIndexSet collectUnitIdsForHieType VisibleAndInvsibleArgs hieFile (getTypeIndexesRecursively combinedLocalTypeIndexes ast)
+          visibleTypeUnitIds = Yiul.Graph.collectFromTypeIndexSet collectUnitIdsForHieType OnlyVisibleArgs hieFile (getTypeIndexesRecursively combinedLocalTypeIndexes ast)
           currentLine =
             ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
               (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
@@ -334,8 +334,8 @@ makeTopLevelBindingModuleReport = makeTsv . (headerLine :) . concatMap handlePai
               . HieTypes.nodeAnnotations
               $ nodeInfo
           termModules = termModuleSet ast
-          nodeTypeModules = collectFromTypeIndexSet collectModulesForHieType OnlyVisibleArgs hieFile (getTypeIndexesRecursively localNodeTypeIndexes ast)
-          identifierTypeModules = collectFromTypeIndexSet collectModulesForHieType OnlyVisibleArgs hieFile (getTypeIndexesRecursively localIdentifierTypeIndexes ast)
+          nodeTypeModules = Yiul.Graph.collectFromTypeIndexSet Yiul.Graph.collectModulesForHieType OnlyVisibleArgs hieFile (getTypeIndexesRecursively localNodeTypeIndexes ast)
+          identifierTypeModules = Yiul.Graph.collectFromTypeIndexSet Yiul.Graph.collectModulesForHieType OnlyVisibleArgs hieFile (getTypeIndexesRecursively localIdentifierTypeIndexes ast)
           currentLine =
             ( (realSrcLocToText . SrcLoc.realSrcSpanStart . HieTypes.nodeSpan) ast,
               (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd . HieTypes.nodeSpan) ast,
@@ -351,6 +351,17 @@ makeTopLevelBindingModuleReport = makeTsv . (headerLine :) . concatMap handlePai
 
 nameToUnitIdSet :: Name.Name -> Set Module.UnitId
 nameToUnitIdSet = Set.fromList . fmap Module.moduleUnitId . Maybe.maybeToList . Name.nameModule_maybe
+
+collectUnitIdsForHieType :: HieTypes.HieType HieTypes.TypeIndex -> Set Module.UnitId
+collectUnitIdsForHieType (HieTypes.HTyVarTy name) = nameToUnitIdSet name
+collectUnitIdsForHieType (HieTypes.HAppTy _index1 _args) = Set.empty
+collectUnitIdsForHieType (HieTypes.HTyConApp ifaceTyCon _args) = (nameToUnitIdSet . IfaceType.ifaceTyConName) ifaceTyCon
+collectUnitIdsForHieType (HieTypes.HForAllTy ((name, _index1), _argFlag) _index2) = nameToUnitIdSet name
+collectUnitIdsForHieType (HieTypes.HFunTy _index1 _index2) = Set.empty
+collectUnitIdsForHieType (HieTypes.HQualTy _index1 _index2) = Set.empty
+collectUnitIdsForHieType (HieTypes.HLitTy _ifaceTyLit) = Set.empty
+collectUnitIdsForHieType (HieTypes.HCastTy _index) = Set.empty
+collectUnitIdsForHieType HieTypes.HCoercionTy = Set.empty
 
 combinedLocalTypeIndexes :: HieTypes.HieAST HieTypes.TypeIndex -> Set HieTypes.TypeIndex
 combinedLocalTypeIndexes ast = localNodeTypeIndexes ast <> localIdentifierTypeIndexes ast
@@ -372,79 +383,6 @@ getTypeIndexesRecursively localGetIndexes ast =
       childrenSets = getTypeIndexesRecursively localGetIndexes <$> nodeChildren
    in localGetIndexes ast <> Set.unions childrenSets
 
-data VisibleArgs = VisibleAndInvsibleArgs | OnlyVisibleArgs | OnlyInvisibleArgs
-
-hieArgsToIndexSet :: VisibleArgs -> HieTypes.HieArgs HieTypes.TypeIndex -> Set HieTypes.TypeIndex
-hieArgsToIndexSet VisibleAndInvsibleArgs (HieTypes.HieArgs pairs) = Set.fromList (snd <$> pairs)
-hieArgsToIndexSet OnlyVisibleArgs (HieTypes.HieArgs pairs) = Set.fromList (snd <$> filter fst pairs)
-hieArgsToIndexSet OnlyInvisibleArgs (HieTypes.HieArgs pairs) = Set.fromList (snd <$> filter (not . fst) pairs)
-
-collectUnitIdsForHieType :: HieTypes.HieType HieTypes.TypeIndex -> Set Module.UnitId
-collectUnitIdsForHieType (HieTypes.HTyVarTy name) = nameToUnitIdSet name
-collectUnitIdsForHieType (HieTypes.HAppTy _index1 _args) = Set.empty
-collectUnitIdsForHieType (HieTypes.HTyConApp ifaceTyCon _args) = (nameToUnitIdSet . IfaceType.ifaceTyConName) ifaceTyCon
-collectUnitIdsForHieType (HieTypes.HForAllTy ((name, _index1), _argFlag) _index2) = nameToUnitIdSet name
-collectUnitIdsForHieType (HieTypes.HFunTy _index1 _index2) = Set.empty
-collectUnitIdsForHieType (HieTypes.HQualTy _index1 _index2) = Set.empty
-collectUnitIdsForHieType (HieTypes.HLitTy _ifaceTyLit) = Set.empty
-collectUnitIdsForHieType (HieTypes.HCastTy _index) = Set.empty
-collectUnitIdsForHieType HieTypes.HCoercionTy = Set.empty
-
-collectNamesForHieType :: HieTypes.HieType HieTypes.TypeIndex -> Set Name.Name
-collectNamesForHieType (HieTypes.HTyVarTy name) = Set.singleton name
-collectNamesForHieType (HieTypes.HAppTy _index1 _args) = Set.empty
-collectNamesForHieType (HieTypes.HTyConApp ifaceTyCon _args) = (Set.singleton . IfaceType.ifaceTyConName) ifaceTyCon
-collectNamesForHieType (HieTypes.HForAllTy ((name, _index1), _argFlag) _index2) = Set.singleton name
-collectNamesForHieType (HieTypes.HFunTy _index1 _index2) = Set.empty
-collectNamesForHieType (HieTypes.HQualTy _index1 _index2) = Set.empty
-collectNamesForHieType (HieTypes.HLitTy _ifaceTyLit) = Set.empty
-collectNamesForHieType (HieTypes.HCastTy _index) = Set.empty
-collectNamesForHieType HieTypes.HCoercionTy = Set.empty
-
-maybeToSet :: Maybe a -> Set a
-maybeToSet Nothing = Set.empty
-maybeToSet (Just x) = Set.singleton x
-
-collectModulesForHieType :: HieTypes.HieType HieTypes.TypeIndex -> Set Module.Module
-collectModulesForHieType (HieTypes.HTyVarTy name) = (maybeToSet . Name.nameModule_maybe) name
-collectModulesForHieType (HieTypes.HAppTy _index1 _args) = Set.empty
-collectModulesForHieType (HieTypes.HTyConApp ifaceTyCon _args) = (maybeToSet . Name.nameModule_maybe . IfaceType.ifaceTyConName) ifaceTyCon
-collectModulesForHieType (HieTypes.HForAllTy ((name, _index1), _argFlag) _index2) = (maybeToSet . Name.nameModule_maybe) name
-collectModulesForHieType (HieTypes.HFunTy _index1 _index2) = Set.empty
-collectModulesForHieType (HieTypes.HQualTy _index1 _index2) = Set.empty
-collectModulesForHieType (HieTypes.HLitTy _ifaceTyLit) = Set.empty
-collectModulesForHieType (HieTypes.HCastTy _index) = Set.empty
-collectModulesForHieType HieTypes.HCoercionTy = Set.empty
-
-extraIndexesForHieType :: VisibleArgs -> HieTypes.HieType HieTypes.TypeIndex -> Set HieTypes.TypeIndex
-extraIndexesForHieType _visibleArgs (HieTypes.HTyVarTy _name) = Set.empty
-extraIndexesForHieType visibleArgs (HieTypes.HAppTy index1 args) = Set.insert index1 (hieArgsToIndexSet visibleArgs args)
-extraIndexesForHieType visibleArgs (HieTypes.HTyConApp _ifaceTyCon args) = hieArgsToIndexSet visibleArgs args
-extraIndexesForHieType _visibleArgs (HieTypes.HForAllTy ((_name, index1), _argFlag) index2) = Set.fromList [index1, index2]
-extraIndexesForHieType _visibleArgs (HieTypes.HFunTy index1 index2) = Set.fromList [index1, index2]
-extraIndexesForHieType _visibleArgs (HieTypes.HQualTy index1 index2) = Set.fromList [index1, index2]
-extraIndexesForHieType _visibleArgs (HieTypes.HLitTy _ifaceTyLit) = Set.empty
-extraIndexesForHieType _visibleArgs (HieTypes.HCastTy index) = Set.singleton index
-extraIndexesForHieType _visibleArgs HieTypes.HCoercionTy = Set.empty
-
-collectFromTypeIndexSet :: Monoid m => (HieTypes.HieType HieTypes.TypeIndex -> m) -> VisibleArgs -> HieTypes.HieFile -> Set HieTypes.TypeIndex -> m
-collectFromTypeIndexSet collect visibleArgs hieFile typeIndexSet = go Set.empty typeIndexSet mempty
-  where
-    go visited toVisit resultSet =
-      if Set.null toVisit
-        then resultSet
-        else
-          let (currentSet, moreToVisit) = Set.splitAt 1 toVisit
-              currentIndex = Set.elemAt 0 currentSet
-           in if Set.member currentIndex visited
-                then go visited moreToVisit resultSet
-                else
-                  let typ = HieTypes.hie_types hieFile ! currentIndex
-                      currentResults = collect typ
-                      extraToVisit = extraIndexesForHieType visibleArgs typ
-                      extraToVisitMinusCurrent = Set.delete currentIndex extraToVisit
-                   in go (Set.insert currentIndex visited) (Set.union moreToVisit extraToVisitMinusCurrent) (currentResults <> resultSet)
-
 termUnitIdSet :: HieTypes.HieAST a -> Set Module.UnitId
 termUnitIdSet ast =
   mconcat
@@ -465,7 +403,7 @@ termModuleSet ast =
 
 identifierToModuleSet :: Either a Name.Name -> Set Module.Module
 identifierToModuleSet (Left _moduleName) = Set.empty -- Is this just a local module or do we need to resolve this?
-identifierToModuleSet (Right name) = (maybeToSet . Name.nameModule_maybe) name
+identifierToModuleSet (Right name) = (Yiul.Graph.maybeToSet . Name.nameModule_maybe) name
 
 identifierToUnitIdSet :: Either a Name.Name -> Set Module.UnitId
 identifierToUnitIdSet (Left _moduleName) = Set.empty
@@ -514,51 +452,10 @@ srcLocToText (SrcLoc.RealSrcLoc loc) =
     <> (Text.pack . show . SrcLoc.srcLocCol) loc
 srcLocToText (SrcLoc.UnhelpfulLoc fastString) = "UnhelpfulLoc:" <> (Text.pack . FastString.unpackFS) fastString
 
-data Package
-  = PackageUnitId LibraryId
-  | PackageExe PackageExeId -- HIE files don't have unambiguous names for exes (and tests) so we approximate by the folder of the hie file (only works if hie files are in the build output dirs; if all hie files are in the same dir, then this approach won't work)
-  deriving (Eq, Ord, Show)
-
--- | Makes a single directory for a given package, possibly long name but without slashes, etc.
-makePackageDirectory :: Package -> FilePath
-makePackageDirectory (PackageUnitId unitId) = "lib-" <> (Text.unpack . unConst) unitId
-makePackageDirectory (PackageExe path) = "exe-" <> (alphaNumericDashPath . unConst) path
-
-isGoodPathChar :: Char -> Bool
-isGoodPathChar c = Char.isAlphaNum c || c == '-' || c == '_'
-
-alphaNumericDashPath :: FilePath -> FilePath
-alphaNumericDashPath [] = []
-alphaNumericDashPath (c : rest) | isGoodPathChar c = c : alphaNumericDashPath rest
-alphaNumericDashPath (_ : rest) = '_' : alphaNumericDashPath (dropWhile (not . isGoodPathChar) rest)
-
 -- | Makes a single directory for a fully qualified module name, could also work as a file name.
 -- @Data.Something.Else@ becomes @Data-Something-Else@
 makeModuleDirectory :: Module.ModuleName -> FilePath
 makeModuleDirectory = fmap (\c -> if c == '.' then '-' else c) . Module.moduleNameString
-
-makePackage :: (HieFilePath, HieFileResult) -> Package
-makePackage (hieFilePath, hieFileResult) =
-  let hieModule = HieTypes.hie_module . HieBin.hie_file_result $ hieFileResult
-      unitId = Module.moduleUnitId hieModule
-   in if unitId /= Module.mainUnitId
-        then PackageUnitId (mkConst @LibraryId . Text.pack . FastString.unpackFS . Module.unitIdFS $ unitId)
-        else
-          let moduleName = Module.moduleNameString . Module.moduleName $ hieModule
-              moduleNameDepth = (+ 1) . length . filter (== '.') $ moduleName
-              iterateTakeDirectory n path | n > 0 = iterateTakeDirectory (n - 1) (FilePath.takeDirectory path)
-              iterateTakeDirectory _ path = path
-              -- assume for module name like 'Data.Something.Other' that the .hie file is in a directory like 'some/dir/Data/Something/Other.hie'
-              -- the result would be 'PackageExe "some/dir"'
-              basePath = iterateTakeDirectory moduleNameDepth (unConst hieFilePath)
-              stackTweaks = (Yiul.Directory.removeFinalNestedTmp . Yiul.Directory.removeStackWorkThroughBuild) basePath
-           in PackageExe (mkConst stackTweaks)
-
-organizeByPackages :: [(HieFilePath, HieFileResult)] -> IO (Map Package [(HieFilePath, HieFileResult)])
-organizeByPackages inputPairs = do
-  let result = Map.fromListWith (<>) $ fmap (\x -> (makePackage x, [x])) inputPairs
-  putStrLn $ "Loaded " <> (show . length . Map.keys) result <> " packages with a total of " <> (show . length . concat . Map.elems) result <> " modules."
-  pure result
 
 makePackagesReport :: Map Package [(HieFilePath, HieFileResult)] -> Text
 makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assocs
@@ -572,7 +469,7 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
       concatMap
         ( \pair ->
             let hieFile = (HieBin.hie_file_result . snd) pair
-                names = (filter Name.isExternalName . Set.toList . getAllNamesForFile) hieFile
+                names = (filter Name.isExternalName . Set.toList . Yiul.Graph.getAllNamesForFile) hieFile
                 modules = (Set.toList . Set.fromList . Maybe.catMaybes . fmap Name.nameModule_maybe) names
                 packageText = (Text.pack . show) package
                 moduleText = (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair
@@ -587,32 +484,51 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
         )
         pairs
 
--- | Returns all names (visible and not visible) within the full type.
--- Probably inefficient when done per index since it may do redundant work for other type indexes.
-getNameSetFromType :: HieTypes.HieFile -> HieTypes.TypeIndex -> Set Name.Name
-getNameSetFromType hieFile typeIndex = collectFromTypeIndexSet collectNamesForHieType VisibleAndInvsibleArgs hieFile (Set.singleton typeIndex)
+makeForwardDependencyReport :: Map OurModule (Set OurModule) -> Text
+makeForwardDependencyReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assocs
+  where
+    headerLine =
+      ( "Module",
+        "Dependends on"
+      )
+    handlePair (moduleValue, depMods) =
+      fmap
+        ( \dep ->
+            ( (Text.pack . show) moduleValue,
+              (Text.pack . show) dep
+            )
+        )
+        (Set.toList depMods)
 
-getNameSetForAstExcludingChildren :: HieTypes.HieFile -> HieTypes.HieAST HieTypes.TypeIndex -> Set Name.Name
-getNameSetForAstExcludingChildren hieFile ast =
-  let nodeTypeNames = (Set.unions . fmap (getNameSetFromType hieFile) . HieTypes.nodeType . HieTypes.nodeInfo) ast
-      identifierNames (Left _moduleName) = Set.empty
-      identifierNames (Right name) = Set.singleton name
-      identifierDetailsNames = maybe Set.empty (getNameSetFromType hieFile) . HieTypes.identType
-      identifierPairNames (identifier, details) = Set.union (identifierNames identifier) (identifierDetailsNames details)
-      allIdentifierNames = (Set.unions . fmap identifierPairNames . Map.assocs . HieTypes.nodeIdentifiers . HieTypes.nodeInfo) ast
-   in Set.union nodeTypeNames allIdentifierNames
+makeReverseDependencyReport :: Map OurModule (Set OurModule) -> Text
+makeReverseDependencyReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assocs
+  where
+    headerLine =
+      ( "Module",
+        "Requires rebuild of"
+      )
+    handlePair (moduleValue, depMods) =
+      fmap
+        ( \dep ->
+            ( (Text.pack . show) moduleValue,
+              (Text.pack . show) dep
+            )
+        )
+        (Set.toList depMods)
 
-getNameSetForAstRecursively :: HieTypes.HieFile -> HieTypes.HieAST HieTypes.TypeIndex -> Set Name.Name
-getNameSetForAstRecursively hieFile ast =
-  let nameSets = fmap (getNameSetForAstExcludingChildren hieFile) (HieUtils.flattenAst ast)
-   in Set.unions nameSets
-
-getAllNamesForFile :: HieTypes.HieFile -> Set Name.Name
-getAllNamesForFile hieFile =
-  let astsMap = (HieTypes.getAsts . HieTypes.hie_asts) hieFile
-      allAsts = concatMap HieUtils.flattenAst (Map.elems astsMap)
-      nameSets = fmap (getNameSetForAstExcludingChildren hieFile) allAsts
-   in Set.unions nameSets
+makeDependencyReportSummary :: Map OurModule (Set OurModule, Set OurModule) -> Text
+makeDependencyReportSummary = makeTsv . (headerLine :) . fmap handlePair . Map.assocs
+  where
+    headerLine =
+      ( "Module",
+        "Dependencies",
+        "Rebuilds"
+      )
+    handlePair (moduleValue, (forwardDeps, reverseDeps)) =
+      ( (Text.pack . show) moduleValue,
+        (Text.pack . show . Set.size) forwardDeps,
+        (Text.pack . show . Set.size) reverseDeps
+      )
 
 instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10) a b where
   each f ~(a, b, c, d, e, g, h, i, j, k) = (,,,,,,,,,) <$> f a <*> f b <*> f c <*> f d <*> f e <*> f g <*> f h <*> f i <*> f j <*> f k
