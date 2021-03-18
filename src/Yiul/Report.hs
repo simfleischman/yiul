@@ -18,6 +18,7 @@ import qualified Data.Array as Array
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.Char as Char
+import qualified Data.Either as Either
 import Data.Generics.Labels ()
 import qualified Data.List as List
 import Data.Map (Map)
@@ -566,24 +567,38 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
     headerLine =
       ( "Package",
         "Module",
-        "Package Directory",
-        "Module Directory",
-        "Module Names count",
-        "Names count"
+        "Span Start",
+        "Span End",
+        "Name"
       )
     handlePair (package, pairs) =
-      fmap
+      concatMap
         ( \pair ->
-            let bothList = (Set.toList . getAllNamesForFile . HieBin.hie_file_result . snd) pair
-                moduleNames = Lens.toListOf (traverse . Lens._Right) bothList
-                names = Lens.toListOf (traverse . Lens._Left) bothList
-             in ( (Text.pack . show) package,
-                  (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair,
-                  (Text.pack . makePackageDirectory) package,
-                  (Text.pack . makeModuleDirectory . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair,
-                  (Text.pack . show . length) moduleNames,
-                  (Text.pack . show . length) names
-                )
+            let hieFile = (HieBin.hie_file_result . snd) pair
+                astsMap = (HieTypes.getAsts . HieTypes.hie_asts) hieFile
+                allAsts = concatMap HieUtils.flattenAst (Map.elems astsMap)
+                packageText = (Text.pack . show) package
+                moduleText = (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair
+             in concatMap
+                  ( \ast ->
+                      let modulesOrNames = Set.toList $ getNameSetForAstExcludingChildren hieFile ast
+                          externalNames = (filter Name.isExternalName . Either.rights) modulesOrNames
+                          makeNameText name = "Name: " <> (Text.pack . Name.nameStableString) name
+                          astSpan = HieTypes.nodeSpan ast
+                          spanStartText = (realSrcLocToText . SrcLoc.realSrcSpanStart) astSpan
+                          spanEndText = (realSrcLocToLineColText . SrcLoc.realSrcSpanEnd) astSpan
+                       in fmap
+                            ( \name ->
+                                ( packageText,
+                                  moduleText,
+                                  spanStartText,
+                                  spanEndText,
+                                  makeNameText name
+                                )
+                            )
+                            externalNames
+                  )
+                  allAsts
         )
         pairs
 
