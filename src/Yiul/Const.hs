@@ -36,6 +36,8 @@ type ModuleName = Const Text "ModuleName"
 
 type PackageName = Const Text "PackageName"
 
+type PackageExeId = Const FilePath "PackageExeId"
+
 mkConst :: forall t (s :: Symbol) a. (t ~ Const a s) => a -> t
 mkConst = Const
 

@@ -31,6 +31,7 @@ import qualified FastString
 import HieBin (HieFileResult)
 import qualified HieBin
 import qualified HieTypes
+import qualified HieUtils
 import qualified IfaceType
 import qualified Module
 import qualified Name
@@ -388,6 +389,17 @@ collectUnitIdsForHieType (HieTypes.HLitTy _ifaceTyLit) = Set.empty
 collectUnitIdsForHieType (HieTypes.HCastTy _index) = Set.empty
 collectUnitIdsForHieType HieTypes.HCoercionTy = Set.empty
 
+collectNamesForHieType :: HieTypes.HieType HieTypes.TypeIndex -> Set Name.Name
+collectNamesForHieType (HieTypes.HTyVarTy name) = Set.singleton name
+collectNamesForHieType (HieTypes.HAppTy _index1 _args) = Set.empty
+collectNamesForHieType (HieTypes.HTyConApp ifaceTyCon _args) = (Set.singleton . IfaceType.ifaceTyConName) ifaceTyCon
+collectNamesForHieType (HieTypes.HForAllTy ((name, _index1), _argFlag) _index2) = Set.singleton name
+collectNamesForHieType (HieTypes.HFunTy _index1 _index2) = Set.empty
+collectNamesForHieType (HieTypes.HQualTy _index1 _index2) = Set.empty
+collectNamesForHieType (HieTypes.HLitTy _ifaceTyLit) = Set.empty
+collectNamesForHieType (HieTypes.HCastTy _index) = Set.empty
+collectNamesForHieType HieTypes.HCoercionTy = Set.empty
+
 maybeToSet :: Maybe a -> Set a
 maybeToSet Nothing = Set.empty
 maybeToSet (Just x) = Set.singleton x
@@ -503,13 +515,13 @@ srcLocToText (SrcLoc.UnhelpfulLoc fastString) = "UnhelpfulLoc:" <> (Text.pack . 
 
 data Package
   = PackageUnitId Module.UnitId
-  | PackageExe FilePath -- HIE files don't have unambiguous names for exes (and tests) so we approximate by the folder of the hie file (only works if hie files are in the build output dirs; if all hie files are in the same dir, then this approach won't work)
+  | PackageExe PackageExeId -- HIE files don't have unambiguous names for exes (and tests) so we approximate by the folder of the hie file (only works if hie files are in the build output dirs; if all hie files are in the same dir, then this approach won't work)
   deriving (Eq, Ord, Show)
 
 -- | Makes a single directory for a given package, possibly long name but without slashes, etc.
-makePackageDirectory :: Package -> FilePath
-makePackageDirectory (PackageUnitId unitId) = "lib-" <> (FastString.unpackFS . Module.unitIdFS) unitId
-makePackageDirectory (PackageExe path) = "exe-" <> alphaNumericDashPath path
+makePackageDirectory :: Package -> PackageName
+makePackageDirectory (PackageUnitId unitId) = mkConst $ Text.pack ("lib-" <> (FastString.unpackFS . Module.unitIdFS) unitId)
+makePackageDirectory (PackageExe path) = mkConst $ Text.pack ("exe-" <> (alphaNumericDashPath . unConst) path)
 
 isGoodPathChar :: Char -> Bool
 isGoodPathChar c = Char.isAlphaNum c || c == '-' || c == '_'
@@ -539,7 +551,7 @@ makePackage (hieFilePath, hieFileResult) =
               -- the result would be 'PackageExe "some/dir"'
               basePath = iterateTakeDirectory moduleNameDepth (unConst hieFilePath)
               stackTweaks = (Yiul.Directory.removeFinalNestedTmp . Yiul.Directory.removeStackWorkThroughBuild) basePath
-           in PackageExe stackTweaks
+           in PackageExe (mkConst stackTweaks)
 
 organizeByPackages :: [(HieFilePath, HieFileResult)] -> IO (Map Package [(HieFilePath, HieFileResult)])
 organizeByPackages inputPairs = do
@@ -554,18 +566,43 @@ makePackagesReport = makeTsv . (headerLine :) . concatMap handlePair . Map.assoc
       ( "Package",
         "Module",
         "Package Directory",
-        "Module Directory"
+        "Module Directory",
+        "Names count"
       )
     handlePair (package, pairs) =
       fmap
         ( \pair ->
-            ( (Text.pack . show) package,
-              (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair,
-              (Text.pack . makePackageDirectory) package,
-              (Text.pack . makeModuleDirectory . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair
-            )
+            let nameSet = (getAllNamesForFile . HieBin.hie_file_result . snd) pair
+             in ( (Text.pack . show) package,
+                  (Text.pack . Module.moduleNameString . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair,
+                  (unConst . makePackageDirectory) package,
+                  (Text.pack . makeModuleDirectory . Module.moduleName . HieTypes.hie_module . HieBin.hie_file_result . snd) pair,
+                  (Text.pack . show . Set.size) nameSet
+                )
         )
         pairs
+
+-- | Returns all names (visible and not visible) within the full type.
+-- Probably inefficient when done per index since it may do redundant work for other type indexes.
+getNameSetFromType :: HieTypes.HieFile -> HieTypes.TypeIndex -> Set Name.Name
+getNameSetFromType hieFile typeIndex = collectFromTypeIndexSet collectNamesForHieType VisibleAndInvsibleArgs hieFile (Set.singleton typeIndex)
+
+getNameSetForAstExcludingChildren :: HieTypes.HieFile -> HieTypes.HieAST HieTypes.TypeIndex -> Set Name.Name
+getNameSetForAstExcludingChildren hieFile ast =
+  let nodeTypeNames = (Set.unions . fmap (getNameSetFromType hieFile) . HieTypes.nodeType . HieTypes.nodeInfo) ast
+      identifierNames (Left _moduleName) = Set.empty -- when do we encounter this? do we need this for Name references?
+      identifierNames (Right name) = Set.singleton name
+      identifierDetailsNames = maybe Set.empty (getNameSetFromType hieFile) . HieTypes.identType
+      identifierPairNames (identifier, details) = Set.union (identifierNames identifier) (identifierDetailsNames details)
+      allIdentifierNames = (Set.unions . fmap identifierPairNames . Map.assocs . HieTypes.nodeIdentifiers . HieTypes.nodeInfo) ast
+   in Set.union nodeTypeNames allIdentifierNames
+
+getAllNamesForFile :: HieTypes.HieFile -> Set Name.Name
+getAllNamesForFile hieFile =
+  let astsMap = (HieTypes.getAsts . HieTypes.hie_asts) hieFile
+      allAsts = concatMap HieUtils.flattenAst (Map.elems astsMap)
+      nameSets = fmap (getNameSetForAstExcludingChildren hieFile) allAsts
+   in Set.unions nameSets
 
 instance (a ~ a2, a ~ a3, a ~ a4, a ~ a5, a ~ a6, a ~ a7, a ~ a8, a ~ a9, a ~ a10, b ~ b2, b ~ b3, b ~ b4, b ~ b5, b ~ b6, b ~ b7, b ~ b8, b ~ b9, b ~ b10) => Lens.Each (a, a2, a3, a4, a5, a6, a7, a8, a9, a10) (b, b2, b3, b4, b5, b6, b7, b8, b9, b10) a b where
   each f ~(a, b, c, d, e, g, h, i, j, k) = (,,,,,,,,,) <$> f a <*> f b <*> f c <*> f d <*> f e <*> f g <*> f h <*> f i <*> f j <*> f k
