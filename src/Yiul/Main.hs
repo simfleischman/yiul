@@ -139,8 +139,8 @@ run
       forwardDependency <- Yiul.Graph.makeModuleDependencyClosure dependency
       reverseDependency <- Yiul.Graph.makeModuleReverseDependencyClosure dependency
       let twoWay = Yiul.Graph.joinForwardAndReverseDependencies forwardDependency reverseDependency
-      Yiul.Report.writeReport (reportsDir </> "dependency-forward.tsv") Yiul.Report.makeForwardDependencyReport forwardDependency
-      Yiul.Report.writeReport (reportsDir </> "dependency-reverse.tsv") Yiul.Report.makeReverseDependencyReport reverseDependency
-      Yiul.Report.writeReport (reportsDir </> "dependency-summary.tsv") Yiul.Report.makeDependencyReportSummary twoWay
+      Yiul.Report.writeReport (reportsDir </> "module-dependency-forward.tsv") Yiul.Report.makeForwardDependencyReport forwardDependency
+      Yiul.Report.writeReport (reportsDir </> "module-dependency-reverse.tsv") Yiul.Report.makeReverseDependencyReport reverseDependency
+      Yiul.Report.writeReport (reportsDir </> "module-dependency-summary.tsv") Yiul.Report.makeDependencyReportSummary twoWay
 
       pure ()
