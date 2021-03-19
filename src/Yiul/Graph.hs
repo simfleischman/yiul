@@ -46,7 +46,7 @@ data Package
   deriving (Eq, Ord, Show)
 
 buildModuleDependency :: Map Package [(HieFilePath, HieFileResult)] -> Map OurModule (Set OurModule)
-buildModuleDependency =
+buildModuleDependency inputMap =
   let getHieFileModule :: (Package, HieTypes.HieFile) -> OurModule
       getHieFileModule (pkg, hieFile) = convertModule pkg (HieTypes.hie_module hieFile)
       getDeps :: (Package, HieTypes.HieFile) -> Set OurModule
@@ -57,32 +57,42 @@ buildModuleDependency =
         let self = getHieFileModule pair
             deps = Set.delete self (getDeps pair)
          in (self, deps)
-   in Map.fromList
-        . fmap makeDep
-        . concatMap (\(pkg, pairs) -> fmap (\pair -> (pkg, (HieBin.hie_file_result . snd) pair)) pairs)
-        . Map.assocs
+      ourModuleDeps :: [(OurModule, Set OurModule)] =
+        fmap makeDep
+          . concatMap (\(pkg, pairs) -> fmap (\pair -> (pkg, (HieBin.hie_file_result . snd) pair)) pairs)
+          . Map.assocs
+          $ inputMap
+      fullModuleSet = Set.unions . fmap snd $ ourModuleDeps
+      inputModuleSet = Set.fromList . fmap fst $ ourModuleDeps
+      extraModuleSet = Set.difference fullModuleSet inputModuleSet
+      extraMap = Map.fromSet (const Set.empty) extraModuleSet
 
-makeModuleDependencyClosure :: Map OurModule (Set OurModule) -> IO (Map OurModule (Set OurModule))
+      -- combine module references not in the hie files.
+      -- if we omit this combination then we get a dependency graph of just our own code, which may be more what we want in some cases
+      combinedAdjacencyMap = Map.unionWith Set.union (Map.fromList ourModuleDeps) extraMap
+   in combinedAdjacencyMap
+
+makeModuleDependencyClosure :: (Show a, Ord a) => Map a (Set a) -> IO (Map a (Set a))
 makeModuleDependencyClosure adjacencyMap = do
   let result = Topograph.runG adjacencyMap $ \g -> Topograph.adjacencyMap $ Topograph.closure g
   case result of
     Left cycle -> do
-      putStrLn "Module cycle:"
+      putStrLn "Cycle:"
       mapM_ print cycle
-      fail "Module cycle found"
+      fail "Cycle found"
     Right depMap -> pure depMap
 
-makeModuleReverseDependencyClosure :: Map OurModule (Set OurModule) -> IO (Map OurModule (Set OurModule))
+makeModuleReverseDependencyClosure :: (Show a, Ord a) => Map a (Set a) -> IO (Map a (Set a))
 makeModuleReverseDependencyClosure adjacencyMap = do
   let result = Topograph.runG adjacencyMap $ \g -> Topograph.adjacencyMap $ Topograph.transpose $ Topograph.closure g
   case result of
     Left cycle -> do
-      putStrLn "Module cycle:"
+      putStrLn "Cycle:"
       mapM_ print cycle
-      fail "Module cycle found"
+      fail "Cycle found"
     Right depMap -> pure depMap
 
-joinForwardAndReverseDependencies :: Map OurModule (Set OurModule) -> Map OurModule (Set OurModule) -> Map OurModule (Set OurModule, Set OurModule)
+joinForwardAndReverseDependencies :: (Ord a) => Map a (Set a) -> Map a (Set a) -> Map a (Set a, Set a)
 joinForwardAndReverseDependencies forwardDeps reverseDeps =
   Map.fromList
     . fmap
