@@ -62,7 +62,7 @@ instance ToJSON HieFileResult where
       Aeson.object
         [ "hie_file_result_version" .= hie_file_result_version,
           "hie_file_result_ghc_version" .= Text.Encoding.decodeUtf8 hie_file_result_ghc_version,
-          "hie_file_result" .= () -- hie_file_result
+          "hie_file_result" .= HieFile hie_file_result
         ]
 
 newtype HieFile = HieFile HieTypes.HieFile
