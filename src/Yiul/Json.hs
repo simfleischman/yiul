@@ -8,6 +8,7 @@
 
 module Yiul.Json where
 
+import qualified Avail
 import qualified BasicTypes
 import Data.Aeson (ToJSON (toJSON), (.=))
 import qualified Data.Aeson as Aeson
@@ -16,6 +17,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
 import qualified FastString
+import qualified FieldLabel
 import GHC.Generics (Generic)
 import qualified HieBin
 import qualified HieTypes
@@ -84,9 +86,35 @@ instance ToJSON HieFile where
           "hie_module" .= Module hie_module,
           "hie_types" .= fmap HieTypeFlat (Array.elems hie_types),
           "hie_asts" .= (),
-          "hie_exports" .= (),
+          "hie_exports" .= fmap AvailInfo hie_exports,
           "hie_hs_src" .= Text.Encoding.decodeUtf8 hie_hs_src
         ]
+
+newtype AvailInfo = AvailInfo Avail.AvailInfo
+
+instance ToJSON AvailInfo where
+  toJSON (AvailInfo (Avail.Avail name)) =
+    Aeson.object
+      [ "type" .= str "Avail",
+        "name" .= Name name
+      ]
+  toJSON (AvailInfo (Avail.AvailTC name pieces fields)) =
+    Aeson.object
+      [ "type" .= str "Avail",
+        "name" .= Name name,
+        "pieces" .= fmap Name pieces,
+        "fields" .= fmap FieldLabel fields
+      ]
+
+newtype FieldLabel = FieldLabel FieldLabel.FieldLabel
+
+instance ToJSON FieldLabel where
+  toJSON (FieldLabel (FieldLabel.FieldLabel {flLabel, flIsOverloaded, flSelector})) =
+    Aeson.object
+      [ "flLabel" .= FastString.unpackFS flLabel,
+        "flIsOverloaded" .= flIsOverloaded,
+        "flSelector" .= Name flSelector
+      ]
 
 newtype Module = Module Module.Module
 
