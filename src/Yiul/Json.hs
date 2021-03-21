@@ -8,6 +8,7 @@
 
 module Yiul.Json where
 
+import qualified BasicTypes
 import Data.Aeson (ToJSON (toJSON), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Array as Array
@@ -18,11 +19,13 @@ import qualified FastString
 import GHC.Generics (Generic)
 import qualified HieBin
 import qualified HieTypes
+import qualified IfaceType
 import qualified Module
 import qualified Name
 import qualified OccName
 import qualified SrcLoc
 import qualified Unique
+import qualified Var
 import Yiul.Const hiding (ModuleName)
 
 newtype HieFileList = HieFileList [(HieFilePath, HieBin.HieFileResult)]
@@ -112,21 +115,21 @@ instance ToJSON HieTypeFlat where
   toJSON (HieTypeFlat (HieTypes.HAppTy index args)) =
     Aeson.object
       [ "type" .= str "HAppTy",
-        "typeIndex" .= index,
-        "args" .= ()
+        "index" .= index,
+        "args" .= HieArgs args
       ]
   toJSON (HieTypeFlat (HieTypes.HTyConApp ifaceTyCon args)) =
     Aeson.object
       [ "type" .= str "HTyConApp",
-        "ifaceTyCon" .= (),
-        "args" .= ()
+        "ifaceTyCon" .= IfaceTyCon ifaceTyCon,
+        "args" .= HieArgs args
       ]
   toJSON (HieTypeFlat (HieTypes.HForAllTy ((name, index1), argFlag) index2)) =
     Aeson.object
       [ "type" .= str "HForAllTy",
         "name" .= Name name,
         "index1" .= index1,
-        "argFlag" .= (),
+        "argFlag" .= ArgFlag argFlag,
         "index2" .= index2
       ]
   toJSON (HieTypeFlat (HieTypes.HFunTy index1 index2)) =
@@ -144,7 +147,7 @@ instance ToJSON HieTypeFlat where
   toJSON (HieTypeFlat (HieTypes.HLitTy ifaceTyLit)) =
     Aeson.object
       [ "type" .= str "HLitTy",
-        "ifaceTyLit" .= ()
+        "ifaceTyLit" .= IfaceTyLit ifaceTyLit
       ]
   toJSON (HieTypeFlat (HieTypes.HCastTy index)) =
     Aeson.object
@@ -158,6 +161,95 @@ instance ToJSON HieTypeFlat where
 
 str :: Text -> Aeson.Value
 str = Aeson.String
+
+newtype IfaceTyLit = IfaceTyLit IfaceType.IfaceTyLit
+
+instance ToJSON IfaceTyLit where
+  toJSON (IfaceTyLit (IfaceType.IfaceNumTyLit num)) =
+    Aeson.object
+      [ "type" .= str "IfaceNumTyLit",
+        "num" .= num
+      ]
+  toJSON (IfaceTyLit (IfaceType.IfaceStrTyLit strValue)) =
+    Aeson.object
+      [ "type" .= str "IfaceStrTyLit",
+        "str" .= FastString.unpackFS strValue
+      ]
+
+newtype ArgFlag = ArgFlag Var.ArgFlag
+
+instance ToJSON ArgFlag where
+  toJSON (ArgFlag (Var.Inferred)) = str "Inferred"
+  toJSON (ArgFlag (Var.Specified)) = str "Specified"
+  toJSON (ArgFlag (Var.Required)) = str "Required"
+
+newtype IfaceTyCon = IfaceTyCon IfaceType.IfaceTyCon
+
+instance ToJSON IfaceTyCon where
+  toJSON (IfaceTyCon IfaceType.IfaceTyCon {ifaceTyConName, ifaceTyConInfo}) =
+    Aeson.object
+      [ "ifaceTyConName" .= Name ifaceTyConName,
+        "ifaceTyConInfo" .= IfaceTyConInfo ifaceTyConInfo
+      ]
+
+newtype IfaceTyConInfo = IfaceTyConInfo IfaceType.IfaceTyConInfo
+
+instance ToJSON IfaceTyConInfo where
+  toJSON (IfaceTyConInfo IfaceType.IfaceTyConInfo {ifaceTyConIsPromoted, ifaceTyConSort}) =
+    Aeson.object
+      [ "ifaceTyConIsPromoted" .= PromotionFlag ifaceTyConIsPromoted,
+        "ifaceTyConSort" .= IfaceTyConSort ifaceTyConSort
+      ]
+
+newtype IfaceTyConSort = IfaceTyConSort IfaceType.IfaceTyConSort
+
+instance ToJSON IfaceTyConSort where
+  toJSON (IfaceTyConSort IfaceType.IfaceNormalTyCon) =
+    Aeson.object
+      [ "type" .= str "IfaceNormalTyCon"
+      ]
+  toJSON (IfaceTyConSort (IfaceType.IfaceTupleTyCon arity tupleSort)) =
+    Aeson.object
+      [ "type" .= str "IfaceTupleTyCon",
+        "arity" .= arity,
+        "tupleSort" .= TupleSort tupleSort
+      ]
+  toJSON (IfaceTyConSort (IfaceType.IfaceSumTyCon arity)) =
+    Aeson.object
+      [ "type" .= str "IfaceSumTyCon",
+        "arity" .= arity
+      ]
+  toJSON (IfaceTyConSort IfaceType.IfaceEqualityTyCon) =
+    Aeson.object
+      [ "type" .= str "IfaceEqualityTyCon"
+      ]
+
+newtype TupleSort = TupleSort BasicTypes.TupleSort
+
+instance ToJSON TupleSort where
+  toJSON (TupleSort BasicTypes.BoxedTuple) = str "BoxedTuple"
+  toJSON (TupleSort BasicTypes.UnboxedTuple) = str "UnboxedTuple"
+  toJSON (TupleSort BasicTypes.ConstraintTuple) = str "ConstraintTuple"
+
+newtype PromotionFlag = PromotionFlag BasicTypes.PromotionFlag
+
+instance ToJSON PromotionFlag where
+  toJSON (PromotionFlag BasicTypes.NotPromoted) = str "NotPromoted"
+  toJSON (PromotionFlag BasicTypes.IsPromoted) = str "IsPromoted"
+
+newtype HieArgs = HieArgs (HieTypes.HieArgs HieTypes.TypeIndex)
+
+instance ToJSON HieArgs where
+  toJSON (HieArgs (HieTypes.HieArgs pairs)) = toJSON (fmap HieArgPair pairs)
+
+newtype HieArgPair = HieArgPair (Bool, HieTypes.TypeIndex)
+
+instance ToJSON HieArgPair where
+  toJSON (HieArgPair (visible, index)) =
+    Aeson.object
+      [ "visible" .= visible,
+        "index" .= index
+      ]
 
 newtype Name = Name Name.Name
 
