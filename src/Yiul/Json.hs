@@ -10,11 +10,18 @@ module Yiul.Json where
 
 import Data.Aeson (ToJSON (toJSON), (.=))
 import qualified Data.Aeson as Aeson
-import qualified Data.Text.Encoding
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text.Encoding
+import qualified FastString
 import GHC.Generics (Generic)
 import qualified HieBin
 import qualified HieTypes
 import qualified Module
+import qualified Name
+import qualified OccName
+import qualified SrcLoc
+import qualified Unique
 import Yiul.Const hiding (ModuleName)
 
 newtype HieFileList = HieFileList [(HieFilePath, HieBin.HieFileResult)]
@@ -50,7 +57,7 @@ instance ToJSON HieFileResult where
       ) =
       Aeson.object
         [ "hie_file_result_version" .= hie_file_result_version,
-          "hie_file_result_ghc_version" .= Data.Text.Encoding.decodeUtf8 hie_file_result_ghc_version,
+          "hie_file_result_ghc_version" .= Text.Encoding.decodeUtf8 hie_file_result_ghc_version,
           "hie_file_result" .= () -- hie_file_result
         ]
 
@@ -92,3 +99,104 @@ newtype ModuleName = ModuleName Module.ModuleName
 
 instance ToJSON ModuleName where
   toJSON (ModuleName moduleName) = toJSON (Module.moduleNameString moduleName)
+
+newtype HieTypeFlat = HieTypeFlat (HieTypes.HieType HieTypes.TypeIndex)
+
+instance ToJSON HieTypeFlat where
+  toJSON (HieTypeFlat (HieTypes.HTyVarTy name)) =
+    Aeson.object
+      [ "type" .= str "HTyVarTy",
+        "name" .= Name name
+      ]
+  toJSON (HieTypeFlat (HieTypes.HAppTy index args)) = Aeson.object ["type" .= str "HAppTy"]
+  toJSON (HieTypeFlat (HieTypes.HTyConApp ifaceTyCon args)) = Aeson.object ["type" .= str "HTyConApp"]
+  toJSON (HieTypeFlat (HieTypes.HForAllTy ((name, index1), argFlag) index2)) =
+    Aeson.object
+      [ "type" .= str "HForAllTy",
+        "name" .= Name name
+      ]
+  toJSON (HieTypeFlat (HieTypes.HFunTy index1 index2)) = Aeson.object ["type" .= str "HFunTy"]
+  toJSON (HieTypeFlat (HieTypes.HQualTy index1 index2)) = Aeson.object ["type" .= str "HQualTy"]
+  toJSON (HieTypeFlat (HieTypes.HLitTy ifaceTyLit)) = Aeson.object ["type" .= str "HLitTy"]
+  toJSON (HieTypeFlat (HieTypes.HCastTy index)) = Aeson.object ["type" .= str "HCastTy"]
+  toJSON (HieTypeFlat HieTypes.HCoercionTy) = Aeson.object ["type" .= str "HCoercionTy"]
+
+str :: Text -> Aeson.Value
+str = Aeson.String
+
+newtype Name = Name Name.Name
+
+instance ToJSON Name where
+  toJSON (Name name) = case HieBin.toHieName name of
+    HieBin.ExternalName moduleValue occName srcSpan ->
+      Aeson.object
+        [ "type" .= str "ExternalName",
+          "module" .= Module moduleValue,
+          "occName" .= OccName occName,
+          "srcSpan" .= SrcSpan srcSpan
+        ]
+    HieBin.LocalName occName srcSpan ->
+      Aeson.object
+        [ "type" .= str "LocalName",
+          "occName" .= OccName occName,
+          "srcSpan" .= SrcSpan srcSpan
+        ]
+    HieBin.KnownKeyName unique ->
+      Aeson.object
+        [ "type" .= str "KnownKeyName",
+          "unique" .= Unique.getKey unique
+        ]
+
+newtype OccName = OccName OccName.OccName
+
+instance ToJSON OccName where
+  toJSON (OccName occName) =
+    Aeson.object
+      [ "nameSpace" .= NameSpace (OccName.occNameSpace occName),
+        "occNameString" .= OccName.occNameString occName
+      ]
+
+newtype SrcSpan = SrcSpan SrcLoc.SrcSpan
+
+newtype NameSpace = NameSpace OccName.NameSpace
+
+instance ToJSON NameSpace where
+  toJSON (NameSpace nameSpace) | nameSpace == OccName.varName = str "VarName"
+  toJSON (NameSpace nameSpace) | nameSpace == OccName.dataName = str "DataName"
+  toJSON (NameSpace nameSpace) | nameSpace == OccName.tvName = str "TvName"
+  toJSON (NameSpace nameSpace) | nameSpace == OccName.tcClsName = str "TcClsName"
+  toJSON (NameSpace _) = str "UnknownNameSpace"
+
+instance ToJSON SrcSpan where
+  toJSON (SrcSpan (SrcLoc.RealSrcSpan realSrcSpan)) =
+    Aeson.object
+      [ "type" .= str "RealSrcSpan",
+        "span" .= realSrcSpanToText realSrcSpan
+      ]
+  toJSON (SrcSpan (SrcLoc.UnhelpfulSpan unhelpfulSpan)) =
+    Aeson.object
+      [ "type" .= str "UnhelpfulSpan",
+        "span" .= FastString.unpackFS unhelpfulSpan
+      ]
+
+realSrcSpanToText :: SrcLoc.RealSrcSpan -> Text
+realSrcSpanToText srcSpan =
+  (realSrcLocToText . SrcLoc.realSrcSpanStart) srcSpan
+    <> "-"
+    <> (Text.pack . show . SrcLoc.srcLocLine . SrcLoc.realSrcSpanEnd) srcSpan
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocCol . SrcLoc.realSrcSpanEnd) srcSpan
+
+realSrcLocToText :: SrcLoc.RealSrcLoc -> Text
+realSrcLocToText loc =
+  (Text.pack . FastString.unpackFS . SrcLoc.srcLocFile) loc
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocLine) loc
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocCol) loc
+
+realSrcLocToLineColText :: SrcLoc.RealSrcLoc -> Text
+realSrcLocToLineColText loc =
+  (Text.pack . show . SrcLoc.srcLocLine) loc
+    <> ":"
+    <> (Text.pack . show . SrcLoc.srcLocCol) loc
