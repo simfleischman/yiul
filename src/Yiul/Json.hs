@@ -10,6 +10,7 @@ module Yiul.Json where
 
 import Data.Aeson (ToJSON (toJSON), (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Array as Array
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
@@ -78,7 +79,7 @@ instance ToJSON HieFile where
       Aeson.object
         [ "hie_hs_file" .= hie_hs_file,
           "hie_module" .= Module hie_module,
-          "hie_types" .= (),
+          "hie_types" .= fmap HieTypeFlat (Array.elems hie_types),
           "hie_asts" .= (),
           "hie_exports" .= (),
           "hie_hs_src" .= ()
@@ -108,18 +109,52 @@ instance ToJSON HieTypeFlat where
       [ "type" .= str "HTyVarTy",
         "name" .= Name name
       ]
-  toJSON (HieTypeFlat (HieTypes.HAppTy index args)) = Aeson.object ["type" .= str "HAppTy"]
-  toJSON (HieTypeFlat (HieTypes.HTyConApp ifaceTyCon args)) = Aeson.object ["type" .= str "HTyConApp"]
+  toJSON (HieTypeFlat (HieTypes.HAppTy index args)) =
+    Aeson.object
+      [ "type" .= str "HAppTy",
+        "typeIndex" .= index,
+        "args" .= ()
+      ]
+  toJSON (HieTypeFlat (HieTypes.HTyConApp ifaceTyCon args)) =
+    Aeson.object
+      [ "type" .= str "HTyConApp",
+        "ifaceTyCon" .= (),
+        "args" .= ()
+      ]
   toJSON (HieTypeFlat (HieTypes.HForAllTy ((name, index1), argFlag) index2)) =
     Aeson.object
       [ "type" .= str "HForAllTy",
-        "name" .= Name name
+        "name" .= Name name,
+        "index1" .= index1,
+        "argFlag" .= (),
+        "index2" .= index2
       ]
-  toJSON (HieTypeFlat (HieTypes.HFunTy index1 index2)) = Aeson.object ["type" .= str "HFunTy"]
-  toJSON (HieTypeFlat (HieTypes.HQualTy index1 index2)) = Aeson.object ["type" .= str "HQualTy"]
-  toJSON (HieTypeFlat (HieTypes.HLitTy ifaceTyLit)) = Aeson.object ["type" .= str "HLitTy"]
-  toJSON (HieTypeFlat (HieTypes.HCastTy index)) = Aeson.object ["type" .= str "HCastTy"]
-  toJSON (HieTypeFlat HieTypes.HCoercionTy) = Aeson.object ["type" .= str "HCoercionTy"]
+  toJSON (HieTypeFlat (HieTypes.HFunTy index1 index2)) =
+    Aeson.object
+      [ "type" .= str "HFunTy",
+        "index1" .= index1,
+        "index2" .= index2
+      ]
+  toJSON (HieTypeFlat (HieTypes.HQualTy index1 index2)) =
+    Aeson.object
+      [ "type" .= str "HQualTy",
+        "index1" .= index1,
+        "index2" .= index2
+      ]
+  toJSON (HieTypeFlat (HieTypes.HLitTy ifaceTyLit)) =
+    Aeson.object
+      [ "type" .= str "HLitTy",
+        "ifaceTyLit" .= ()
+      ]
+  toJSON (HieTypeFlat (HieTypes.HCastTy index)) =
+    Aeson.object
+      [ "type" .= str "HCastTy",
+        "index" .= index
+      ]
+  toJSON (HieTypeFlat HieTypes.HCoercionTy) =
+    Aeson.object
+      [ "type" .= str "HCoercionTy"
+      ]
 
 str :: Text -> Aeson.Value
 str = Aeson.String
