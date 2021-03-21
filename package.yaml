@@ -26,6 +26,7 @@ dependencies:
 - pretty-simple
 - text
 - topograph
+- unordered-containers
 
 library:
   source-dirs: src

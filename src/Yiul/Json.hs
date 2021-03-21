@@ -10,9 +10,12 @@ module Yiul.Json where
 
 import qualified Avail
 import qualified BasicTypes
+import qualified Control.Lens as Lens
 import Data.Aeson (ToJSON (toJSON), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Array as Array
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
@@ -29,6 +32,7 @@ import qualified SrcLoc
 import qualified Unique
 import qualified Var
 import Yiul.Const hiding (ModuleName)
+import Prelude hiding (span)
 
 newtype HieFileList = HieFileList [(HieFilePath, HieBin.HieFileResult)]
   deriving stock (Generic)
@@ -85,10 +89,191 @@ instance ToJSON HieFile where
         [ "hie_hs_file" .= hie_hs_file,
           "hie_module" .= Module hie_module,
           "hie_types" .= fmap HieTypeFlat (Array.elems hie_types),
-          "hie_asts" .= (),
+          "hie_asts" .= HieASTs hie_asts,
           "hie_exports" .= fmap AvailInfo hie_exports,
           "hie_hs_src" .= Text.Encoding.decodeUtf8 hie_hs_src
         ]
+
+newtype HieASTs = HieASTs (HieTypes.HieASTs HieTypes.TypeIndex)
+
+instance ToJSON HieASTs where
+  toJSON (HieASTs (HieTypes.HieASTs hieMap)) =
+    toJSON (Map.fromList . fmap (\(k, v) -> (FastString.unpackFS k, HieAST v)) . Map.toList $ hieMap)
+
+newtype HieAST = HieAST (HieTypes.HieAST HieTypes.TypeIndex)
+
+instance ToJSON HieAST where
+  toJSON (HieAST (HieTypes.Node {nodeInfo, nodeSpan, nodeChildren})) =
+    Aeson.object
+      [ "nodeInfo" .= NodeInfo nodeInfo,
+        "nodeSpan" .= realSrcSpanToText nodeSpan,
+        "nodeChildren" .= fmap HieAST nodeChildren
+      ]
+
+newtype NodeInfo = NodeInfo (HieTypes.NodeInfo HieTypes.TypeIndex)
+
+instance ToJSON NodeInfo where
+  toJSON (NodeInfo (HieTypes.NodeInfo {nodeAnnotations, nodeType, nodeIdentifiers})) =
+    Aeson.object
+      [ "nodeAnnotations" .= fmap (Lens.over Lens.both FastString.unpackFS) (Set.toList nodeAnnotations),
+        "nodeType" .= nodeType,
+        "nodeIdentifiers" .= fmap IdentifierPair (Map.toList nodeIdentifiers)
+      ]
+
+newtype IdentifierPair = IdentifierPair (HieTypes.Identifier, HieTypes.IdentifierDetails HieTypes.TypeIndex)
+
+instance ToJSON IdentifierPair where
+  toJSON (IdentifierPair (identifier, details)) =
+    Aeson.object
+      [ "identifier" .= Identifier identifier,
+        "details" .= IdentifierDetails details
+      ]
+
+newtype IdentifierDetails = IdentifierDetails (HieTypes.IdentifierDetails HieTypes.TypeIndex)
+
+instance ToJSON IdentifierDetails where
+  toJSON (IdentifierDetails (HieTypes.IdentifierDetails {identType, identInfo})) =
+    Aeson.object
+      [ "identType" .= identType,
+        "identInfo" .= fmap ContextInfo (Set.toList identInfo)
+      ]
+
+newtype ContextInfo = ContextInfo HieTypes.ContextInfo
+
+instance ToJSON ContextInfo where
+  toJSON (ContextInfo HieTypes.Use) =
+    Aeson.object
+      [ "type" .= str "Use"
+      ]
+  toJSON (ContextInfo HieTypes.MatchBind) =
+    Aeson.object
+      [ "type" .= str "MatchBind"
+      ]
+  toJSON (ContextInfo (HieTypes.IEThing ieType)) =
+    Aeson.object
+      [ "type" .= str "IEThing",
+        "ieType" .= IEType ieType
+      ]
+  toJSON (ContextInfo HieTypes.TyDecl) =
+    Aeson.object
+      [ "type" .= str "TyDecl"
+      ]
+  toJSON (ContextInfo (HieTypes.ValBind bindType scope span)) =
+    Aeson.object
+      [ "type" .= str "ValBind",
+        "bindType" .= BindType bindType,
+        "scope" .= Scope scope,
+        "span" .= fmap realSrcSpanToText span
+      ]
+  toJSON (ContextInfo (HieTypes.PatternBind scopeInPattern scopeOutsidePattern span)) =
+    Aeson.object
+      [ "type" .= str "PatternBind",
+        "scopeInPattern" .= Scope scopeInPattern,
+        "scopeOutsidePattern" .= Scope scopeOutsidePattern,
+        "span" .= fmap realSrcSpanToText span
+      ]
+  toJSON (ContextInfo (HieTypes.ClassTyDecl span)) =
+    Aeson.object
+      [ "type" .= str "ClassTyDecl",
+        "span" .= fmap realSrcSpanToText span
+      ]
+  toJSON (ContextInfo (HieTypes.Decl declType span)) =
+    Aeson.object
+      [ "type" .= str "Decl",
+        "declType" .= DeclType declType,
+        "span" .= fmap realSrcSpanToText span
+      ]
+  toJSON (ContextInfo (HieTypes.TyVarBind scope tyVarScope)) =
+    Aeson.object
+      [ "type" .= str "TyVarBind",
+        "scope" .= Scope scope,
+        "tyVarScope" .= TyVarScope tyVarScope
+      ]
+  toJSON (ContextInfo (HieTypes.RecField recFieldContext span)) =
+    Aeson.object
+      [ "type" .= str "RecField",
+        "recFieldContext" .= RecFieldContext recFieldContext,
+        "span" .= fmap realSrcSpanToText span
+      ]
+
+newtype RecFieldContext = RecFieldContext HieTypes.RecFieldContext
+
+instance ToJSON RecFieldContext where
+  toJSON (RecFieldContext HieTypes.RecFieldDecl) = str "RecFieldDecl"
+  toJSON (RecFieldContext HieTypes.RecFieldAssign) = str "RecFieldAssign"
+  toJSON (RecFieldContext HieTypes.RecFieldMatch) = str "RecFieldMatch"
+  toJSON (RecFieldContext HieTypes.RecFieldOcc) = str "RecFieldOcc"
+
+newtype TyVarScope = TyVarScope HieTypes.TyVarScope
+
+instance ToJSON TyVarScope where
+  toJSON (TyVarScope (HieTypes.ResolvedScopes scopes)) =
+    Aeson.object
+      [ "type" .= str "ResolvedScopes",
+        "scopes" .= fmap Scope scopes
+      ]
+  toJSON (TyVarScope (HieTypes.UnresolvedScope names span)) =
+    Aeson.object
+      [ "type" .= str "UnresolvedScope",
+        "names" .= fmap Name names,
+        "span" .= fmap realSrcSpanToText span
+      ]
+
+newtype DeclType = DeclType HieTypes.DeclType
+
+instance ToJSON DeclType where
+  toJSON (DeclType HieTypes.FamDec) = "FamDec"
+  toJSON (DeclType HieTypes.SynDec) = "SynDec"
+  toJSON (DeclType HieTypes.DataDec) = "DataDec"
+  toJSON (DeclType HieTypes.ConDec) = "ConDec"
+  toJSON (DeclType HieTypes.PatSynDec) = "PatSynDec"
+  toJSON (DeclType HieTypes.ClassDec) = "ClassDec"
+  toJSON (DeclType HieTypes.InstDec) = "InstDec"
+
+newtype BindType = BindType HieTypes.BindType
+
+instance ToJSON BindType where
+  toJSON (BindType HieTypes.RegularBind) = str "RegularBind"
+  toJSON (BindType HieTypes.InstanceBind) = str "InstanceBind"
+
+newtype Scope = Scope HieTypes.Scope
+
+instance ToJSON Scope where
+  toJSON (Scope HieTypes.NoScope) =
+    Aeson.object
+      [ "type" .= str "NoScope"
+      ]
+  toJSON (Scope (HieTypes.LocalScope span)) =
+    Aeson.object
+      [ "type" .= str "LocalScope",
+        "span" .= realSrcSpanToText span
+      ]
+  toJSON (Scope HieTypes.ModuleScope) =
+    Aeson.object
+      [ "type" .= str "ModuleScope"
+      ]
+
+newtype IEType = IEType HieTypes.IEType
+
+instance ToJSON IEType where
+  toJSON (IEType HieTypes.Import) = "Import"
+  toJSON (IEType HieTypes.ImportAs) = "ImportAs"
+  toJSON (IEType HieTypes.ImportHiding) = "ImportHiding"
+  toJSON (IEType HieTypes.Export) = "Export"
+
+newtype Identifier = Identifier (HieTypes.Identifier)
+
+instance ToJSON Identifier where
+  toJSON (Identifier (Left moduleName)) =
+    Aeson.object
+      [ "type" .= str "ModuleName",
+        "moduleName" .= ModuleName moduleName
+      ]
+  toJSON (Identifier (Right name)) =
+    Aeson.object
+      [ "type" .= str "Name",
+        "name" .= Name name
+      ]
 
 newtype AvailInfo = AvailInfo Avail.AvailInfo
 
