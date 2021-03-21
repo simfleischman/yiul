@@ -85,7 +85,7 @@ instance ToJSON HieFile where
           "hie_types" .= fmap HieTypeFlat (Array.elems hie_types),
           "hie_asts" .= (),
           "hie_exports" .= (),
-          "hie_hs_src" .= ()
+          "hie_hs_src" .= Text.Encoding.decodeUtf8 hie_hs_src
         ]
 
 newtype Module = Module Module.Module
