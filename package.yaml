@@ -8,6 +8,7 @@ ghc-options:
 - +RTS -A32M -RTS
 
 dependencies:
+- aeson
 - array
 - base
 - bytestring
