@@ -9,15 +9,21 @@
 module Yiul.Main where
 
 import Control.Monad (join, when)
+import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as ByteString.Lazy
 import Data.Generics.Labels ()
+import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text.Encoding
 import GHC.TypeLits (Symbol)
 import Options.Applicative hiding (flag)
 import qualified System.Directory as Directory
+import qualified System.IO
+import qualified Text.Pretty.Simple as Pretty
 import Yiul.Const
 import qualified Yiul.GhcPkg
 import qualified Yiul.Graph
 import qualified Yiul.Hie
+import qualified Yiul.Json
 import qualified Yiul.Report
 
 main :: IO ()
@@ -62,13 +68,23 @@ main =
           )
         <*> switchFlag @TopLevelBindingPackageReportFlag
           ( long "top-level-binding-package-report"
-              <> short 'a'
+              <> short 'k'
               <> help "Generate a report of packages for top-level bindings"
           )
         <*> switchFlag @TopLevelBindingModuleReportFlag
           ( long "top-level-binding-module-report"
-              <> short 'a'
+              <> short 'm'
               <> help "Generate a report of modules for top-level bindings"
+          )
+        <*> switchFlag @JsonOutputFlag
+          ( long "json-output"
+              <> short 'j'
+              <> help "Generate json output for hie files"
+          )
+        <*> switchFlag @PrettyJsonFlag
+          ( long "pretty-json"
+              <> short 'y'
+              <> help "Make the json output formatted. Only applies with --json-output"
           )
 
 switchFlag :: forall t (s :: Symbol). (t ~ Const Bool s) => Mod FlagFields Bool -> Parser t
@@ -81,6 +97,8 @@ run ::
   AstReportFlag ->
   TopLevelBindingPackageReportFlag ->
   TopLevelBindingModuleReportFlag ->
+  JsonOutputFlag ->
+  PrettyJsonFlag ->
   IO ()
 run
   projectDir
@@ -88,7 +106,9 @@ run
   mGhcPkgDump
   astReportFlag
   topLevelBindingPackageReportFlag
-  topLevelBindingModuleReportFlag =
+  topLevelBindingModuleReportFlag
+  jsonOutputFlag
+  prettyJsonFlag =
     do
       case mGhcPkgDump of
         Nothing -> pure ()
@@ -142,5 +162,13 @@ run
       Yiul.Report.writeReport (reportsDir </> "module-dependency-forward.tsv") Yiul.Report.makeForwardDependencyReport forwardDependency
       Yiul.Report.writeReport (reportsDir </> "module-dependency-reverse.tsv") Yiul.Report.makeReverseDependencyReport reverseDependency
       Yiul.Report.writeReport (reportsDir </> "module-dependency-summary.tsv") Yiul.Report.makeDependencyReportSummary twoWay
+
+      whenFlag jsonOutputFlag do
+        let jsonBytes = Aeson.encode (Yiul.Json.HieFileList hieFileResults)
+        if (unConst prettyJsonFlag)
+          then do
+            let jsonString = Text.unpack $ Text.Encoding.decodeUtf8 $ ByteString.Lazy.toStrict jsonBytes
+            Pretty.pPrintString jsonString
+          else ByteString.Lazy.hPut System.IO.stdout jsonBytes
 
       pure ()

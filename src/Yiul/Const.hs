@@ -38,6 +38,10 @@ type LibraryId = Const Text "LibraryId"
 
 type PackageExeId = Const FilePath "PackageExeId"
 
+type JsonOutputFlag = Const Bool "JsonOutputFlag"
+
+type PrettyJsonFlag = Const Bool "PrettyJsonFlag"
+
 mkConst :: forall t (s :: Symbol) a. (t ~ Const a s) => a -> t
 mkConst = Const
 
