@@ -328,7 +328,7 @@ instance ToJSON HieTypeFlat where
   toJSON (HieTypeFlat (HieTypes.HAppTy index args)) =
     Aeson.object
       [ "tag" .= str "HAppTy",
-        "index" .= index,
+        "typeIndex" .= index,
         "args" .= HieArgs args
       ]
   toJSON (HieTypeFlat (HieTypes.HTyConApp ifaceTyCon args)) =
@@ -341,21 +341,21 @@ instance ToJSON HieTypeFlat where
     Aeson.object
       [ "tag" .= str "HForAllTy",
         "name" .= Name name,
-        "index1" .= index1,
+        "typeIndex1" .= index1,
         "argFlag" .= ArgFlag argFlag,
-        "index2" .= index2
+        "typeIndex2" .= index2
       ]
   toJSON (HieTypeFlat (HieTypes.HFunTy index1 index2)) =
     Aeson.object
       [ "tag" .= str "HFunTy",
-        "index1" .= index1,
-        "index2" .= index2
+        "typeIndex1" .= index1,
+        "typeIndex2" .= index2
       ]
   toJSON (HieTypeFlat (HieTypes.HQualTy index1 index2)) =
     Aeson.object
       [ "tag" .= str "HQualTy",
-        "index1" .= index1,
-        "index2" .= index2
+        "typeIndex1" .= index1,
+        "typeIndex2" .= index2
       ]
   toJSON (HieTypeFlat (HieTypes.HLitTy ifaceTyLit)) =
     Aeson.object
@@ -365,7 +365,7 @@ instance ToJSON HieTypeFlat where
   toJSON (HieTypeFlat (HieTypes.HCastTy index)) =
     Aeson.object
       [ "tag" .= str "HCastTy",
-        "index" .= index
+        "typeIndex" .= index
       ]
   toJSON (HieTypeFlat HieTypes.HCoercionTy) =
     Aeson.object
