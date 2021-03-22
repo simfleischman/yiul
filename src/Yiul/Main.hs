@@ -165,7 +165,7 @@ run
       Yiul.Report.writeReport (reportsDir </> "module-dependency-summary.tsv") Yiul.Report.makeDependencyReportSummary twoWay
 
       whenFlag jsonOutputFlag do
-        let jsonBytes = Aeson.encode (Yiul.Json.HieFileList hieFileResults)
+        let jsonBytes = Aeson.encode (Yiul.Json.HiePackageMap packageMap)
         if (unConst prettyJsonFlag)
           then do
             let jsonString = Text.unpack $ Text.Encoding.decodeUtf8 $ ByteString.Lazy.toStrict jsonBytes

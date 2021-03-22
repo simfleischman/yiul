@@ -4,6 +4,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Yiul.Json where
@@ -13,7 +14,8 @@ import qualified BasicTypes
 import Data.Aeson (ToJSON (toJSON), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Array as Array
-import qualified Data.Map.Strict as Map
+import qualified Data.Map.Lazy as Map.Lazy
+import qualified Data.Map.Strict as Map.Strict
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text.Encoding
@@ -30,7 +32,36 @@ import qualified SrcLoc
 import qualified Unique
 import qualified Var
 import Yiul.Const hiding (ModuleName)
+import qualified Yiul.Graph
 import Prelude hiding (span)
+
+newtype HiePackageMap = HiePackageMap (Map.Lazy.Map Yiul.Graph.Package [(HieFilePath, HieBin.HieFileResult)])
+
+instance ToJSON HiePackageMap where
+  toJSON (HiePackageMap packageMap) = toJSON (fmap HiePackageFiles $ Map.Lazy.toList packageMap)
+
+newtype HiePackageFiles = HiePackageFiles (Yiul.Graph.Package, [(HieFilePath, HieBin.HieFileResult)])
+
+instance ToJSON HiePackageFiles where
+  toJSON (HiePackageFiles (package, hieFiles)) =
+    Aeson.object
+      [ "package" .= Package package,
+        "hieFiles" .= HieFileList hieFiles
+      ]
+
+newtype Package = Package Yiul.Graph.Package
+
+instance ToJSON Package where
+  toJSON (Package (Yiul.Graph.PackageUnitId unitId)) =
+    Aeson.object
+      [ "tag" .= str "PackageUnitId",
+        "unitId" .= UnitId unitId
+      ]
+  toJSON (Package (Yiul.Graph.PackageExe exe)) =
+    Aeson.object
+      [ "tag" .= str "PackageExe",
+        "exe" .= exe
+      ]
 
 newtype HieFileList = HieFileList [(HieFilePath, HieBin.HieFileResult)]
   deriving stock (Generic)
@@ -96,7 +127,7 @@ newtype HieASTs = HieASTs (HieTypes.HieASTs HieTypes.TypeIndex)
 
 instance ToJSON HieASTs where
   toJSON (HieASTs (HieTypes.HieASTs hieMap)) =
-    toJSON (Map.fromList . fmap (\(k, v) -> (FastString.unpackFS k, HieAST v)) . Map.toList $ hieMap)
+    toJSON (Map.Strict.fromList . fmap (\(k, v) -> (FastString.unpackFS k, HieAST v)) . Map.Strict.toList $ hieMap)
 
 newtype HieAST = HieAST (HieTypes.HieAST HieTypes.TypeIndex)
 
@@ -115,7 +146,7 @@ instance ToJSON NodeInfo where
     Aeson.object
       [ "nodeAnnotations" .= fmap NodeAnnotation (Set.toList nodeAnnotations),
         "nodeType" .= nodeType,
-        "nodeIdentifiers" .= fmap IdentifierPair (Map.toList nodeIdentifiers)
+        "nodeIdentifiers" .= fmap IdentifierPair (Map.Strict.toList nodeIdentifiers)
       ]
 
 newtype NodeAnnotation = NodeAnnotation (FastString.FastString, FastString.FastString)
