@@ -10,7 +10,6 @@ module Yiul.Json where
 
 import qualified Avail
 import qualified BasicTypes
-import qualified Control.Lens as Lens
 import Data.Aeson (ToJSON (toJSON), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Array as Array
@@ -114,9 +113,18 @@ newtype NodeInfo = NodeInfo (HieTypes.NodeInfo HieTypes.TypeIndex)
 instance ToJSON NodeInfo where
   toJSON (NodeInfo (HieTypes.NodeInfo {nodeAnnotations, nodeType, nodeIdentifiers})) =
     Aeson.object
-      [ "nodeAnnotations" .= fmap (Lens.over Lens.both FastString.unpackFS) (Set.toList nodeAnnotations),
+      [ "nodeAnnotations" .= fmap NodeAnnotation (Set.toList nodeAnnotations),
         "nodeType" .= nodeType,
         "nodeIdentifiers" .= fmap IdentifierPair (Map.toList nodeIdentifiers)
+      ]
+
+newtype NodeAnnotation = NodeAnnotation (FastString.FastString, FastString.FastString)
+
+instance ToJSON NodeAnnotation where
+  toJSON (NodeAnnotation (nodeConstructor, nodeType)) =
+    Aeson.object
+      [ "nodeConstructor" .= FastString.unpackFS nodeConstructor,
+        "nodeType" .= FastString.unpackFS nodeType
       ]
 
 newtype IdentifierPair = IdentifierPair (HieTypes.Identifier, HieTypes.IdentifierDetails HieTypes.TypeIndex)
