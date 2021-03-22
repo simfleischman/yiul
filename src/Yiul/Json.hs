@@ -17,7 +17,6 @@ import qualified Data.Array as Array
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
-import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
 import qualified FastString
 import qualified FieldLabel
@@ -106,7 +105,7 @@ instance ToJSON HieAST where
   toJSON (HieAST (HieTypes.Node {nodeInfo, nodeSpan, nodeChildren})) =
     Aeson.object
       [ "nodeInfo" .= NodeInfo nodeInfo,
-        "nodeSpan" .= realSrcSpanToText nodeSpan,
+        "nodeSpan" .= RealSrcSpan nodeSpan,
         "nodeChildren" .= fmap HieAST nodeChildren
       ]
 
@@ -163,25 +162,25 @@ instance ToJSON ContextInfo where
       [ "tag" .= str "ValBind",
         "bindType" .= BindType bindType,
         "scope" .= Scope scope,
-        "span" .= fmap realSrcSpanToText span
+        "span" .= fmap RealSrcSpan span
       ]
   toJSON (ContextInfo (HieTypes.PatternBind scopeInPattern scopeOutsidePattern span)) =
     Aeson.object
       [ "tag" .= str "PatternBind",
         "scopeInPattern" .= Scope scopeInPattern,
         "scopeOutsidePattern" .= Scope scopeOutsidePattern,
-        "span" .= fmap realSrcSpanToText span
+        "span" .= fmap RealSrcSpan span
       ]
   toJSON (ContextInfo (HieTypes.ClassTyDecl span)) =
     Aeson.object
       [ "tag" .= str "ClassTyDecl",
-        "span" .= fmap realSrcSpanToText span
+        "span" .= fmap RealSrcSpan span
       ]
   toJSON (ContextInfo (HieTypes.Decl declType span)) =
     Aeson.object
       [ "tag" .= str "Decl",
         "declType" .= DeclType declType,
-        "span" .= fmap realSrcSpanToText span
+        "span" .= fmap RealSrcSpan span
       ]
   toJSON (ContextInfo (HieTypes.TyVarBind scope tyVarScope)) =
     Aeson.object
@@ -193,7 +192,7 @@ instance ToJSON ContextInfo where
     Aeson.object
       [ "tag" .= str "RecField",
         "recFieldContext" .= RecFieldContext recFieldContext,
-        "span" .= fmap realSrcSpanToText span
+        "span" .= fmap RealSrcSpan span
       ]
 
 newtype RecFieldContext = RecFieldContext HieTypes.RecFieldContext
@@ -216,7 +215,7 @@ instance ToJSON TyVarScope where
     Aeson.object
       [ "tag" .= str "UnresolvedScope",
         "names" .= fmap Name names,
-        "span" .= fmap realSrcSpanToText span
+        "span" .= fmap RealSrcSpan span
       ]
 
 newtype DeclType = DeclType HieTypes.DeclType
@@ -246,7 +245,7 @@ instance ToJSON Scope where
   toJSON (Scope (HieTypes.LocalScope span)) =
     Aeson.object
       [ "tag" .= str "LocalScope",
-        "span" .= realSrcSpanToText span
+        "span" .= RealSrcSpan span
       ]
   toJSON (Scope HieTypes.ModuleScope) =
     Aeson.object
@@ -511,7 +510,7 @@ instance ToJSON SrcSpan where
   toJSON (SrcSpan (SrcLoc.RealSrcSpan realSrcSpan)) =
     Aeson.object
       [ "tag" .= str "RealSrcSpan",
-        "span" .= realSrcSpanToText realSrcSpan
+        "span" .= RealSrcSpan realSrcSpan
       ]
   toJSON (SrcSpan (SrcLoc.UnhelpfulSpan unhelpfulSpan)) =
     Aeson.object
@@ -519,24 +518,14 @@ instance ToJSON SrcSpan where
         "span" .= FastString.unpackFS unhelpfulSpan
       ]
 
-realSrcSpanToText :: SrcLoc.RealSrcSpan -> Text
-realSrcSpanToText srcSpan =
-  (realSrcLocToText . SrcLoc.realSrcSpanStart) srcSpan
-    <> "-"
-    <> (Text.pack . show . SrcLoc.srcLocLine . SrcLoc.realSrcSpanEnd) srcSpan
-    <> ":"
-    <> (Text.pack . show . SrcLoc.srcLocCol . SrcLoc.realSrcSpanEnd) srcSpan
+newtype RealSrcSpan = RealSrcSpan SrcLoc.RealSrcSpan
 
-realSrcLocToText :: SrcLoc.RealSrcLoc -> Text
-realSrcLocToText loc =
-  (Text.pack . FastString.unpackFS . SrcLoc.srcLocFile) loc
-    <> ":"
-    <> (Text.pack . show . SrcLoc.srcLocLine) loc
-    <> ":"
-    <> (Text.pack . show . SrcLoc.srcLocCol) loc
-
-realSrcLocToLineColText :: SrcLoc.RealSrcLoc -> Text
-realSrcLocToLineColText loc =
-  (Text.pack . show . SrcLoc.srcLocLine) loc
-    <> ":"
-    <> (Text.pack . show . SrcLoc.srcLocCol) loc
+instance ToJSON RealSrcSpan where
+  toJSON (RealSrcSpan span) =
+    Aeson.object
+      [ "file" .= (FastString.unpackFS . SrcLoc.srcSpanFile) span,
+        "startLine" .= SrcLoc.srcSpanStartLine span,
+        "endLine" .= SrcLoc.srcSpanEndLine span,
+        "startCol" .= SrcLoc.srcSpanStartCol span,
+        "endCol" .= SrcLoc.srcSpanEndCol span
+      ]
