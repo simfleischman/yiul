@@ -36,6 +36,7 @@ import qualified IfaceType
 import qualified Module
 import qualified Name
 import qualified SrcLoc
+import System.IO (hPutStrLn, stderr)
 import qualified UniqSet
 import Yiul.Const
 import qualified Yiul.Directory
@@ -110,7 +111,7 @@ makeUnitIdText (Module.DefiniteUnitId defUnitId) = (Text.pack . FastString.unpac
 
 writeReport :: ReportsPath -> (a -> Text) -> a -> IO ()
 writeReport reportPath makeReport hieFileResults = do
-  putStrLn $ "Writing " <> unConst reportPath
+  hPutStrLn stderr $ "Writing " <> unConst reportPath
   ByteString.writeFile (unConst reportPath) $ Text.Encoding.encodeUtf8 $ makeReport hieFileResults
 
 -- | Index by HIE version (Integer) and GHC version (ByteString)
@@ -132,30 +133,30 @@ checkHieVersions hieFileResults = do
       when (HieTypes.hieVersion /= hieVersion) do
         fail $ "Our HIE version: " <> show HieTypes.hieVersion <> " does not match .hie file version: " <> show hieVersion
     _ : _ : _ -> do
-      putStrLn "Multiple versions of HIE/GHC found. See version report for details."
-      mapM_ (\(hieVersion, ghcVersion) -> putStrLn $ show hieVersion <> " / " <> (Text.unpack . Text.Encoding.decodeUtf8) ghcVersion) versionMapKeys
+      hPutStrLn stderr "Multiple versions of HIE/GHC found. See version report for details."
+      mapM_ (\(hieVersion, ghcVersion) -> hPutStrLn stderr $ show hieVersion <> " / " <> (Text.unpack . Text.Encoding.decodeUtf8) ghcVersion) versionMapKeys
 
 processASTs :: [(HieFilePath, HieFileResult)] -> IO ()
 processASTs hieFileResults = do
   let astFilePathSet = foldr buildAstFilePathSet Set.empty hieFileResults
-  putStrLn $ "AST key count: " <> (show . Set.size) astFilePathSet
+  hPutStrLn stderr $ "AST key count: " <> (show . Set.size) astFilePathSet
 
   when False do
-    mapM_ (putStrLn . FastString.unpackFS) astFilePathSet
+    mapM_ (hPutStrLn stderr . FastString.unpackFS) astFilePathSet
 
   let topLevelAsts = concatMap (maybe [] pure . getMaybeAst . HieBin.hie_file_result . snd) hieFileResults
       topLevelNodeInfos = HieTypes.nodeInfo <$> topLevelAsts
   let topLevelNodePairs = foldr buildNodeConstructorNodeTypePairCount Map.empty topLevelNodeInfos
-  putStrLn $ "Top-level node constructor/type pair count: " <> (show . Map.size) topLevelNodePairs
+  hPutStrLn stderr $ "Top-level node constructor/type pair count: " <> (show . Map.size) topLevelNodePairs
   mapM_
-    (\(pair, ct) -> putStrLn $ pairToString pair <> " : " <> show ct)
+    (\(pair, ct) -> hPutStrLn stderr $ pairToString pair <> " : " <> show ct)
     (Map.assocs topLevelNodePairs)
 
   let subModuleTopLevelNodeInfos = HieTypes.nodeInfo <$> concatMap HieTypes.nodeChildren topLevelAsts
       subModuleTopLevelNodeInfoMap = foldr buildAnnotationPairs Map.empty subModuleTopLevelNodeInfos
-  putStrLn $ "Sub-module node constructor/type pair count: " <> (show . Map.size) subModuleTopLevelNodeInfoMap
+  hPutStrLn stderr $ "Sub-module node constructor/type pair count: " <> (show . Map.size) subModuleTopLevelNodeInfoMap
   mapM_
-    (\(pairSet, ct) -> putStrLn $ (List.intercalate ", " . fmap pairToString . Set.toList) pairSet <> " : " <> show ct)
+    (\(pairSet, ct) -> hPutStrLn stderr $ (List.intercalate ", " . fmap pairToString . Set.toList) pairSet <> " : " <> show ct)
     (Map.assocs subModuleTopLevelNodeInfoMap)
   where
     pairToString (ctr, typ) = FastString.unpackFS ctr <> "/" <> FastString.unpackFS typ

@@ -17,6 +17,7 @@ import qualified Data.Text.Encoding as Text.Encoding
 import GHC.TypeLits (Symbol)
 import Options.Applicative hiding (flag)
 import qualified System.Directory as Directory
+import System.IO (hPutStrLn, stderr)
 import qualified System.IO
 import qualified Text.Pretty.Simple as Pretty
 import Yiul.Const
@@ -114,23 +115,23 @@ run
         Nothing -> pure ()
         Just ghcPkgDump ->
           do
-            putStrLn $ "Loading ghc-pkg dump output: " <> unConst ghcPkgDump
+            hPutStrLn stderr $ "Loading ghc-pkg dump output: " <> unConst ghcPkgDump
             bytes <- ByteString.Lazy.readFile (unConst ghcPkgDump)
             case Yiul.GhcPkg.parsePackages bytes of
               Left errs -> do
-                mapM_ putStrLn errs
+                mapM_ (hPutStrLn stderr) errs
                 fail "See above errors parsing ghc-pkg dump output"
               Right results -> do
-                putStrLn $ "Loaded " <> (show . length) results <> " package infos"
+                hPutStrLn stderr $ "Loaded " <> (show . length) results <> " package infos"
 
       hieFilePaths <-
         case mHieFileListPath of
           Nothing ->
             do
-              putStrLn $ "Recursively finding files in " <> unConst projectDir
+              hPutStrLn stderr $ "Recursively finding files in " <> unConst projectDir
               Yiul.Hie.findHieFiles projectDir
           Just hieFileListPath -> Yiul.Hie.loadHieFileList projectDir hieFileListPath
-      putStrLn $ ".hie files found: " <> (show . length) hieFilePaths
+      hPutStrLn stderr $ ".hie files found: " <> (show . length) hieFilePaths
 
       hieFileResults <- Yiul.Hie.topLevelLoadHieFiles projectDir hieFilePaths
 

@@ -14,17 +14,18 @@ import NameCache (NameCache)
 import qualified NameCache
 import qualified System.Directory.Recursive as Directory.Recursive
 import qualified System.FilePath as FilePath
+import System.IO (hPutStrLn, stderr)
 import qualified UniqSupply
 import Yiul.Const
 import Yiul.Directory (removeDotDirectories)
 
 topLevelLoadHieFiles :: ProjectDir -> [HieFilePath] -> IO [(HieFilePath, HieFileResult)]
 topLevelLoadHieFiles projectDir hieFilePaths = do
-  putStrLn "Loading .hie files"
+  hPutStrLn stderr "Loading .hie files"
   uniqSupply <- UniqSupply.mkSplitUniqSupply 'Q'
   let initialNameCache = NameCache.initNameCache uniqSupply []
   (_finalNameCache, hieFileResults) <- loadHieFiles initialNameCache projectDir hieFilePaths
-  putStrLn $ ".hie files loaded: " <> (show . length) hieFileResults
+  hPutStrLn stderr $ ".hie files loaded: " <> (show . length) hieFileResults
   pure hieFileResults
 
 loadHieFiles :: NameCache -> ProjectDir -> [HieFilePath] -> IO (NameCache, [(HieFilePath, HieFileResult)])

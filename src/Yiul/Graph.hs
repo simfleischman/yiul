@@ -29,6 +29,7 @@ import qualified IfaceType
 import qualified Module
 import qualified Name
 import qualified System.FilePath as FilePath
+import System.IO (hPutStrLn, stderr)
 import qualified Topograph
 import Yiul.Const
 import qualified Yiul.Directory
@@ -77,7 +78,7 @@ makeModuleDependencyClosure adjacencyMap = do
   let result = Topograph.runG adjacencyMap $ \g -> Topograph.adjacencyMap $ Topograph.closure g
   case result of
     Left cycle -> do
-      putStrLn "Cycle:"
+      hPutStrLn stderr "Cycle:"
       mapM_ print cycle
       fail "Cycle found"
     Right depMap -> pure depMap
@@ -87,7 +88,7 @@ makeModuleReverseDependencyClosure adjacencyMap = do
   let result = Topograph.runG adjacencyMap $ \g -> Topograph.adjacencyMap $ Topograph.transpose $ Topograph.closure g
   case result of
     Left cycle -> do
-      putStrLn "Cycle:"
+      hPutStrLn stderr "Cycle:"
       mapM_ print cycle
       fail "Cycle found"
     Right depMap -> pure depMap
@@ -154,7 +155,7 @@ makePackage (hieFilePath, hieFileResult) =
 organizeByPackages :: [(HieFilePath, HieFileResult)] -> IO (Map Package [(HieFilePath, HieFileResult)])
 organizeByPackages inputPairs = do
   let result = Map.fromListWith (<>) $ fmap (\x -> (makePackage x, [x])) inputPairs
-  putStrLn $ "Loaded " <> (show . length . Map.keys) result <> " packages with a total of " <> (show . length . concat . Map.elems) result <> " modules."
+  hPutStrLn stderr $ "Loaded " <> (show . length . Map.keys) result <> " packages with a total of " <> (show . length . concat . Map.elems) result <> " modules."
   pure result
 
 -- | Returns all names (visible and not visible) within the full type.
