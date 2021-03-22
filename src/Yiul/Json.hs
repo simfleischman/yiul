@@ -143,55 +143,55 @@ newtype ContextInfo = ContextInfo HieTypes.ContextInfo
 instance ToJSON ContextInfo where
   toJSON (ContextInfo HieTypes.Use) =
     Aeson.object
-      [ "type" .= str "Use"
+      [ "tag" .= str "Use"
       ]
   toJSON (ContextInfo HieTypes.MatchBind) =
     Aeson.object
-      [ "type" .= str "MatchBind"
+      [ "tag" .= str "MatchBind"
       ]
   toJSON (ContextInfo (HieTypes.IEThing ieType)) =
     Aeson.object
-      [ "type" .= str "IEThing",
+      [ "tag" .= str "IEThing",
         "ieType" .= IEType ieType
       ]
   toJSON (ContextInfo HieTypes.TyDecl) =
     Aeson.object
-      [ "type" .= str "TyDecl"
+      [ "tag" .= str "TyDecl"
       ]
   toJSON (ContextInfo (HieTypes.ValBind bindType scope span)) =
     Aeson.object
-      [ "type" .= str "ValBind",
+      [ "tag" .= str "ValBind",
         "bindType" .= BindType bindType,
         "scope" .= Scope scope,
         "span" .= fmap realSrcSpanToText span
       ]
   toJSON (ContextInfo (HieTypes.PatternBind scopeInPattern scopeOutsidePattern span)) =
     Aeson.object
-      [ "type" .= str "PatternBind",
+      [ "tag" .= str "PatternBind",
         "scopeInPattern" .= Scope scopeInPattern,
         "scopeOutsidePattern" .= Scope scopeOutsidePattern,
         "span" .= fmap realSrcSpanToText span
       ]
   toJSON (ContextInfo (HieTypes.ClassTyDecl span)) =
     Aeson.object
-      [ "type" .= str "ClassTyDecl",
+      [ "tag" .= str "ClassTyDecl",
         "span" .= fmap realSrcSpanToText span
       ]
   toJSON (ContextInfo (HieTypes.Decl declType span)) =
     Aeson.object
-      [ "type" .= str "Decl",
+      [ "tag" .= str "Decl",
         "declType" .= DeclType declType,
         "span" .= fmap realSrcSpanToText span
       ]
   toJSON (ContextInfo (HieTypes.TyVarBind scope tyVarScope)) =
     Aeson.object
-      [ "type" .= str "TyVarBind",
+      [ "tag" .= str "TyVarBind",
         "scope" .= Scope scope,
         "tyVarScope" .= TyVarScope tyVarScope
       ]
   toJSON (ContextInfo (HieTypes.RecField recFieldContext span)) =
     Aeson.object
-      [ "type" .= str "RecField",
+      [ "tag" .= str "RecField",
         "recFieldContext" .= RecFieldContext recFieldContext,
         "span" .= fmap realSrcSpanToText span
       ]
@@ -209,12 +209,12 @@ newtype TyVarScope = TyVarScope HieTypes.TyVarScope
 instance ToJSON TyVarScope where
   toJSON (TyVarScope (HieTypes.ResolvedScopes scopes)) =
     Aeson.object
-      [ "type" .= str "ResolvedScopes",
+      [ "tag" .= str "ResolvedScopes",
         "scopes" .= fmap Scope scopes
       ]
   toJSON (TyVarScope (HieTypes.UnresolvedScope names span)) =
     Aeson.object
-      [ "type" .= str "UnresolvedScope",
+      [ "tag" .= str "UnresolvedScope",
         "names" .= fmap Name names,
         "span" .= fmap realSrcSpanToText span
       ]
@@ -241,16 +241,16 @@ newtype Scope = Scope HieTypes.Scope
 instance ToJSON Scope where
   toJSON (Scope HieTypes.NoScope) =
     Aeson.object
-      [ "type" .= str "NoScope"
+      [ "tag" .= str "NoScope"
       ]
   toJSON (Scope (HieTypes.LocalScope span)) =
     Aeson.object
-      [ "type" .= str "LocalScope",
+      [ "tag" .= str "LocalScope",
         "span" .= realSrcSpanToText span
       ]
   toJSON (Scope HieTypes.ModuleScope) =
     Aeson.object
-      [ "type" .= str "ModuleScope"
+      [ "tag" .= str "ModuleScope"
       ]
 
 newtype IEType = IEType HieTypes.IEType
@@ -266,12 +266,12 @@ newtype Identifier = Identifier (HieTypes.Identifier)
 instance ToJSON Identifier where
   toJSON (Identifier (Left moduleName)) =
     Aeson.object
-      [ "type" .= str "ModuleName",
+      [ "tag" .= str "ModuleName",
         "moduleName" .= ModuleName moduleName
       ]
   toJSON (Identifier (Right name)) =
     Aeson.object
-      [ "type" .= str "Name",
+      [ "tag" .= str "Name",
         "name" .= Name name
       ]
 
@@ -280,12 +280,12 @@ newtype AvailInfo = AvailInfo Avail.AvailInfo
 instance ToJSON AvailInfo where
   toJSON (AvailInfo (Avail.Avail name)) =
     Aeson.object
-      [ "type" .= str "Avail",
+      [ "tag" .= str "Avail",
         "name" .= Name name
       ]
   toJSON (AvailInfo (Avail.AvailTC name pieces fields)) =
     Aeson.object
-      [ "type" .= str "Avail",
+      [ "tag" .= str "Avail",
         "name" .= Name name,
         "pieces" .= fmap Name pieces,
         "fields" .= fmap FieldLabel fields
@@ -322,24 +322,24 @@ newtype HieTypeFlat = HieTypeFlat (HieTypes.HieType HieTypes.TypeIndex)
 instance ToJSON HieTypeFlat where
   toJSON (HieTypeFlat (HieTypes.HTyVarTy name)) =
     Aeson.object
-      [ "type" .= str "HTyVarTy",
+      [ "tag" .= str "HTyVarTy",
         "name" .= Name name
       ]
   toJSON (HieTypeFlat (HieTypes.HAppTy index args)) =
     Aeson.object
-      [ "type" .= str "HAppTy",
+      [ "tag" .= str "HAppTy",
         "index" .= index,
         "args" .= HieArgs args
       ]
   toJSON (HieTypeFlat (HieTypes.HTyConApp ifaceTyCon args)) =
     Aeson.object
-      [ "type" .= str "HTyConApp",
+      [ "tag" .= str "HTyConApp",
         "ifaceTyCon" .= IfaceTyCon ifaceTyCon,
         "args" .= HieArgs args
       ]
   toJSON (HieTypeFlat (HieTypes.HForAllTy ((name, index1), argFlag) index2)) =
     Aeson.object
-      [ "type" .= str "HForAllTy",
+      [ "tag" .= str "HForAllTy",
         "name" .= Name name,
         "index1" .= index1,
         "argFlag" .= ArgFlag argFlag,
@@ -347,29 +347,29 @@ instance ToJSON HieTypeFlat where
       ]
   toJSON (HieTypeFlat (HieTypes.HFunTy index1 index2)) =
     Aeson.object
-      [ "type" .= str "HFunTy",
+      [ "tag" .= str "HFunTy",
         "index1" .= index1,
         "index2" .= index2
       ]
   toJSON (HieTypeFlat (HieTypes.HQualTy index1 index2)) =
     Aeson.object
-      [ "type" .= str "HQualTy",
+      [ "tag" .= str "HQualTy",
         "index1" .= index1,
         "index2" .= index2
       ]
   toJSON (HieTypeFlat (HieTypes.HLitTy ifaceTyLit)) =
     Aeson.object
-      [ "type" .= str "HLitTy",
+      [ "tag" .= str "HLitTy",
         "ifaceTyLit" .= IfaceTyLit ifaceTyLit
       ]
   toJSON (HieTypeFlat (HieTypes.HCastTy index)) =
     Aeson.object
-      [ "type" .= str "HCastTy",
+      [ "tag" .= str "HCastTy",
         "index" .= index
       ]
   toJSON (HieTypeFlat HieTypes.HCoercionTy) =
     Aeson.object
-      [ "type" .= str "HCoercionTy"
+      [ "tag" .= str "HCoercionTy"
       ]
 
 str :: Text -> Aeson.Value
@@ -380,12 +380,12 @@ newtype IfaceTyLit = IfaceTyLit IfaceType.IfaceTyLit
 instance ToJSON IfaceTyLit where
   toJSON (IfaceTyLit (IfaceType.IfaceNumTyLit num)) =
     Aeson.object
-      [ "type" .= str "IfaceNumTyLit",
+      [ "tag" .= str "IfaceNumTyLit",
         "num" .= num
       ]
   toJSON (IfaceTyLit (IfaceType.IfaceStrTyLit strValue)) =
     Aeson.object
-      [ "type" .= str "IfaceStrTyLit",
+      [ "tag" .= str "IfaceStrTyLit",
         "str" .= FastString.unpackFS strValue
       ]
 
@@ -419,22 +419,22 @@ newtype IfaceTyConSort = IfaceTyConSort IfaceType.IfaceTyConSort
 instance ToJSON IfaceTyConSort where
   toJSON (IfaceTyConSort IfaceType.IfaceNormalTyCon) =
     Aeson.object
-      [ "type" .= str "IfaceNormalTyCon"
+      [ "tag" .= str "IfaceNormalTyCon"
       ]
   toJSON (IfaceTyConSort (IfaceType.IfaceTupleTyCon arity tupleSort)) =
     Aeson.object
-      [ "type" .= str "IfaceTupleTyCon",
+      [ "tag" .= str "IfaceTupleTyCon",
         "arity" .= arity,
         "tupleSort" .= TupleSort tupleSort
       ]
   toJSON (IfaceTyConSort (IfaceType.IfaceSumTyCon arity)) =
     Aeson.object
-      [ "type" .= str "IfaceSumTyCon",
+      [ "tag" .= str "IfaceSumTyCon",
         "arity" .= arity
       ]
   toJSON (IfaceTyConSort IfaceType.IfaceEqualityTyCon) =
     Aeson.object
-      [ "type" .= str "IfaceEqualityTyCon"
+      [ "tag" .= str "IfaceEqualityTyCon"
       ]
 
 newtype TupleSort = TupleSort BasicTypes.TupleSort
@@ -470,20 +470,20 @@ instance ToJSON Name where
   toJSON (Name name) = case HieBin.toHieName name of
     HieBin.ExternalName moduleValue occName srcSpan ->
       Aeson.object
-        [ "type" .= str "ExternalName",
+        [ "tag" .= str "ExternalName",
           "module" .= Module moduleValue,
           "occName" .= OccName occName,
           "srcSpan" .= SrcSpan srcSpan
         ]
     HieBin.LocalName occName srcSpan ->
       Aeson.object
-        [ "type" .= str "LocalName",
+        [ "tag" .= str "LocalName",
           "occName" .= OccName occName,
           "srcSpan" .= SrcSpan srcSpan
         ]
     HieBin.KnownKeyName unique ->
       Aeson.object
-        [ "type" .= str "KnownKeyName",
+        [ "tag" .= str "KnownKeyName",
           "unique" .= Unique.getKey unique
         ]
 
@@ -510,12 +510,12 @@ instance ToJSON NameSpace where
 instance ToJSON SrcSpan where
   toJSON (SrcSpan (SrcLoc.RealSrcSpan realSrcSpan)) =
     Aeson.object
-      [ "type" .= str "RealSrcSpan",
+      [ "tag" .= str "RealSrcSpan",
         "span" .= realSrcSpanToText realSrcSpan
       ]
   toJSON (SrcSpan (SrcLoc.UnhelpfulSpan unhelpfulSpan)) =
     Aeson.object
-      [ "type" .= str "UnhelpfulSpan",
+      [ "tag" .= str "UnhelpfulSpan",
         "span" .= FastString.unpackFS unhelpfulSpan
       ]
 
